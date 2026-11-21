@@ -43,8 +43,8 @@ export const courses = [
   },
   {
     name: '白樺トラバース', level: '連絡', color: '#87530d', width: 4,
-    description: '水鏡バーンの中腹からクワッド麓駅へ横切る連絡路。',
-    points: [[35, 48], [45, 42], [52, 33], [53, 22], [48, 11], [46, 1], [44, -17], [47, -37], [46, -65]],
+    description: '水鏡バーンの中腹からリフトの西側を通り、クワッド麓駅の手前へ。',
+    points: [[35, 48], [36, 42], [34, 33], [35, 22], [33, 11], [35, 1], [37, -17], [35, -37], [37, -55], [38, -64]],
   },
 ];
 
@@ -74,6 +74,12 @@ for (const course of courses) {
   course.points = course.points.map(([x, along]) => [x * slopeWidthScale, slopeAlong(along)]);
   course.width *= 1.5;
   course.samples = sampleCourse(course.points);
+}
+
+export function terminalNetFront(quad, summit) {
+  const station = summit ? (quad ? places.quadTop : places.pairTop)
+    : (quad ? places.quadBase : places.pairBase);
+  return station.along + (summit ? -24 : 45);
 }
 
 function smoothstep(value, min, max) {
@@ -191,7 +197,37 @@ export function terrainHeight(x, along) {
   const pairCorridor = 1 - smoothstep(Math.abs(x + 2), 4.2, 11);
   const pairSnow = liftGround(along);
   const groomed = base + (pairSnow - base) * pairCorridor;
-  return shapeQuadApron(x, along, groomed + linkBank);
+  const lowerAlong = along - places.quadBase.along;
+  const lineProgress = smoothstep(along, quadLine.climbStart, quadLine.climbEnd);
+  const quadX = places.quadBase.x + (places.quadTop.x - places.quadBase.x) * lineProgress;
+  const quadCorridor = (1 - smoothstep(Math.abs(x - (quadX - 2.65)), 4.6, 8.3))
+    * smoothstep(lowerAlong, 5, 29) * (1 - smoothstep(lowerAlong, 165, 205));
+  const quadCeiling = quadLiftGround(along) - 1.2;
+  const lowered = groomed + linkBank;
+  const cleared = lowered - Math.max(0, lowered - quadCeiling) * quadCorridor;
+
+  // The rolls fade out around both stations and the groomed lift corridor.
+  const reliefZone = smoothstep(along, 35, 86) * (1 - smoothstep(along, 244, 280));
+  const spur = 2.8 * Math.exp(-(((x + 16 + 4 * Math.sin(along / 52)) / 9) ** 2));
+  const gully = 3.1 * Math.exp(-(((x - 43 - 5 * Math.sin(along / 41)) / 10) ** 2));
+  const shoulder = 2.5 * Math.exp(-(((x - 67 + 3 * Math.cos(along / 43)) / 13) ** 2));
+  const relief = reliefZone * (spur + shoulder - gully) * (1 - pairCorridor);
+  let snow = shapeQuadApron(x, along, cleared + relief);
+  for (const quad of [false, true]) {
+    const line = quad ? quadLine : pairLine;
+    const lower = quad ? places.quadBase : places.pairBase;
+    const upper = quad ? places.quadTop : places.pairTop;
+    const track = quad ? quadLiftGround : liftGround;
+    const radius = quad ? 2.65 : 2;
+    const center = lower.x + (upper.x - lower.x) * smoothstep(along, line.climbStart, line.climbEnd);
+    const width = 1 - smoothstep(Math.abs(x - (center - radius)), radius + 1.55, radius + 4);
+    for (const summit of [false, true]) {
+      const front = terminalNetFront(quad, summit);
+      const weight = width * (1 - smoothstep(Math.abs(along - front), 2, 14));
+      snow -= Math.max(0, snow - (track(along) - 1.9)) * weight;
+    }
+  }
+  return snow;
 }
 
 export function nearCourse(x, along, margin) {

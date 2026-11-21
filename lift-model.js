@@ -100,17 +100,23 @@ function addDetachableGrip(chair) {
     tube(spring,helix,0.009);
     part(spring,new THREE.CylinderGeometry(0.023,0.023,1,12),fastener,0,0.5,0);
   }
-  poseDetachableGrip(chair, 0);
+  poseDetachableGrip(chairParts(chair), 0);
 }
 
-export function poseDetachableGrip(chair, opening) {
-  const lever = chair.getObjectByName('quad-grip-jaw');
+export function chairParts(chair) {
+  return {
+    lever: chair.getObjectByName('quad-grip-jaw'),
+    springs: ['quad-grip-spring-front','quad-grip-spring-back'].map(name => chair.getObjectByName(name)),
+    bar: chair.getObjectByName('quad-safety-bar'),
+  };
+}
+
+export function poseDetachableGrip({ lever, springs }, opening) {
   const angle = jawAngle * opening;
   lever.rotation.z = angle;
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  for (const name of ['quad-grip-spring-front','quad-grip-spring-back']) {
-    const spring = chair.getObjectByName(name);
+  for (const spring of springs) {
     springEnd.set(gripPivot.x + 0.43*c - 0.216*s, gripPivot.y + 0.43*s + 0.216*c, spring.userData.springTipZ);
     springDirection.subVectors(springEnd,spring.position);
     spring.scale.y = springDirection.length();
@@ -150,12 +156,16 @@ export function createChairModel(quad, drop) {
     beam(chair,0.085,0.044,0.48,fastener,x,seat-0.089,0);
   }
   tube(chair, [[-half,seat+0.42,0.25],[half,seat+0.42,0.25]], 0.033);
+  const carrier = new THREE.Group();
+  carrier.name = 'chair-carrier';
+  for (const child of [...chair.children]) carrier.add(child);
+  chair.add(carrier);
   if (quad) {
     addDetachableGrip(chair);
     const bar = new THREE.Group();
     bar.name = 'quad-safety-bar';
     bar.position.set(0,seat+0.62,0.16);
-    chair.add(bar);
+    carrier.add(bar);
     tube(bar,[[-half,0,0],[-half,0,-0.46],[-half+0.09,0,-0.70],
       [-half+0.30,0,-0.74],[half-0.30,0,-0.74],[half-0.09,0,-0.70],[half,0,-0.46],[half,0,0]],0.037,fastener);
     tube(bar,[[-half+0.14,0,-0.742],[half-0.14,0,-0.742]],0.052,rubber);

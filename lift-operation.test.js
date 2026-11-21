@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createLiftOperations } from './lift-operation.js';
+
+test('quad matches rope speed, aligns, clamps and only then clears the rail', () => {
+  const operation = createLiftOperations(true);
+  const { boarding, start, handoff } = operation.config;
+  const sync = boarding + 15 - start;
+  const read = offset => operation.mechanicsAt(sync + offset);
+  assert.ok(read(-1).speed < 5);
+  assert.ok(read(0).carrierDrop > 0);
+  assert.equal(read(0).gripOpening, 1);
+  for (let offset = 0; offset <= handoff.railEnd + 1; offset += .05) {
+    const state = read(offset);
+    assert.equal(state.speed, 5);
+    assert.equal(state.ropeSpeed, 5);
+    if (offset < handoff.aligned) assert.equal(state.gripOpening, 1);
+    if (offset >= handoff.aligned) assert.equal(state.carrierDrop, 0);
+    if (offset >= handoff.clamped) assert.equal(state.gripOpening, 0);
+    if (offset < handoff.clamped) assert.equal(state.railFall, 0);
+    if (Math.abs(offset - handoff.railEnd) > 1e-8) assert.equal(state.railPresent, offset < handoff.railEnd);
+  }
+  assert.deepEqual([-.6,.8,6.1,11,14].map(offset => operation.terminalModeAt(sync + offset)),
+    ['accelerate', 'align', 'close', 'releaseRail', 'line']);
+  const release = read((handoff.clamped + handoff.railEnd) / 2);
+  assert.ok(release.railFall > 0 && release.railPresent);
+  assert.equal(read(handoff.railEnd + .1).railPresent, false);
+});
+
+test('both lift types reserve a chair and complete a ride independently of rendering', () => {
+  for (const quad of [false, true]) {
+    const lift = createLiftOperations(quad);
+    lift.begin();
+    const stages = [lift.state.phase];
+    for (let i = 0; i < 6000 && lift.state.phase !== 'arrived'; i++) {
+      lift.advance(.05);
+      if (stages.at(-1) !== lift.state.phase) stages.push(lift.state.phase);
+    }
+    assert.deepEqual(stages, ['waiting', 'boarding', 'riding', 'unloading', 'arrived']);
+    lift.finishRide();
+    assert.equal(lift.state.phase, 'finished');
+    lift.begin();
+    assert.equal(lift.state.phase, 'waiting');
+    assert.ok(lift.state.reservedChair >= 0 && lift.state.reservedChair < lift.config.chairCount);
+  }
+});

@@ -13,6 +13,7 @@ const jackets = jacketColors.map(fabric);
 const torsoGeometry = new THREE.CapsuleGeometry(0.18, 0.17, 5, 10);
 const headGeometry = new THREE.SphereGeometry(0.104, 12, 8);
 const limbGeometry = new THREE.CapsuleGeometry(0.065, 0.23, 4, 9);
+const bootGeometry = new THREE.BoxGeometry(.13,.11,.24);
 const skiGeometry = new THREE.BoxGeometry(0.075, 0.031, 1.18);
 const poleGeometry = new THREE.CylinderGeometry(0.009, 0.009, 0.83, 7);
 const boardOutline = new THREE.Shape();
@@ -34,10 +35,13 @@ function mesh(parent, geometry, material, x, y, z) {
   return item;
 }
 
+const bodies = new WeakMap();
+
 function skier(colorIndex, snowboard) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   body.name = 'body';
+  bodies.set(root, body);
   root.userData.snowboard = snowboard;
   if (snowboard) body.rotation.y = -Math.PI / 2;
   root.add(body);
@@ -65,23 +69,68 @@ function skier(colorIndex, snowboard) {
 
 const fastPole = fabric(0x747b86);
 
+const seatedLegs = new WeakMap();
+const legLength = .39;
+
+export function poseSitting(rider, progress, snowY = -Infinity, release = 1, quad = false) {
+  const { legs, board } = seatedLegs.get(rider);
+  const snow = snowY - rider.position.y;
+  const groundedAnkle = snow + .085;
+  const extendedAnkle = quad ? THREE.MathUtils.lerp(-.69, -.59, progress) : -.69;
+  const ankleY = Math.max(groundedAnkle, THREE.MathUtils.lerp(extendedAnkle, -.43, release));
+  const ankleZ = THREE.MathUtils.lerp(-.08, -.30, progress);
+  const hipY = .035;
+  const hipZ = -.025;
+  const dy = ankleY - hipY;
+  const dz = ankleZ - hipZ;
+  const reach = Math.hypot(dy, dz);
+  const bend = Math.sqrt(Math.max(0, legLength ** 2 - (reach / 2) ** 2));
+  const kneeY = hipY + dy / 2 + dz / reach * bend;
+  const kneeZ = hipZ + dz / 2 + dy / reach * bend;
+
+  for (const { thigh, shin, ski, boot } of legs) {
+    poseLegSegment(thigh, hipY, hipZ, kneeY, kneeZ);
+    poseLegSegment(shin, kneeY, kneeZ, ankleY, ankleZ);
+    boot.position.y = ankleY - .025;
+    boot.position.z = ankleZ - .035;
+    ski.position.y = ankleY - .0695;
+    ski.position.z = ankleZ - .09;
+  }
+  board.position.y = ankleY - .085;
+  board.position.z = ankleZ - .09;
+}
+
+function poseLegSegment(segment, y1, z1, y2, z2) {
+  segment.position.y = (y1 + y2) / 2;
+  segment.position.z = (z1 + z2) / 2;
+  segment.rotation.x = Math.atan2(z1 - z2, y1 - y2);
+  segment.scale.y = Math.hypot(y2 - y1, z2 - z1) / .36;
+}
+
 function seatedSkier(colorIndex) {
   const rider = new THREE.Group();
+  const legs = [];
   const jacket = jackets[colorIndex % jackets.length];
   mesh(rider,torsoGeometry,jacket,0,0.38,0.031).scale.set(.78,.9,.78);
+  mesh(rider,new THREE.CylinderGeometry(.061,.069,.113,10),jacket,0,.642,-.008);
   mesh(rider,headGeometry,helmet,0,0.754,-0.022).scale.setScalar(0.92);
   mesh(rider,new THREE.BoxGeometry(0.142,0.043,0.037),goggles,0,0.738,-0.109);
   for(const side of [-1,1]){
     const x=side*0.082;
-    mesh(rider,limbGeometry,pants,x,0.07,-0.173).rotation.x=Math.PI/2;
-    mesh(rider,limbGeometry,pants,x,-0.102,-0.307).rotation.x=-0.17;
+    const thigh = mesh(rider,limbGeometry,pants,x,0.07,-0.173);
+    const shin = mesh(rider,limbGeometry,pants,x,-0.102,-0.307);
     mesh(rider,limbGeometry,jacket,side*0.17,0.32,-0.11).scale.set(.8,.74,.82);
-    mesh(rider,skiGeometry,snowEquipment,x,-0.31,-0.45).name = 'passenger-ski';
+    const boot = mesh(rider,bootGeometry,glove,x,0,0);
+    const ski = mesh(rider,skiGeometry,snowEquipment,x,-0.31,-0.45);
+    ski.name = 'passenger-ski';
+    legs.push({ thigh, shin, boot, ski });
   }
   const board = mesh(rider,boardGeometry,boardFinish,-0.065,-0.306,-0.42);
   board.name = 'passenger-board';
   board.rotation.y = Math.PI * 0.16;
   board.visible = false;
+  seatedLegs.set(rider, { legs, board });
+  poseSitting(rider, 1);
   return rider;
 }
 
@@ -94,6 +143,8 @@ function createRoute(course) {
   }
   return path;
 }
+
+export const queueSpacing = 1.22;
 
 export function createPopulation(scene, courses, terrainHeight, chairs, station) {
   const routeSpecs = [[6,5.0,2.05],[6,7.4,4.30],[4,7.0,2.03],[4,5.0,1.30]];
@@ -113,7 +164,14 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     const model = skier(lane + row * 2, lane % 2 === 1);
     model.name = 'lift-queue-skier';
     model.userData.lane = lane;
-    model.userData.queueRow = row;
+    const materials = new Map();
+    model.userData.jacket = bodies.get(model).children[0].material;
+    model.traverse(part => {
+      if (!part.isMesh) return;
+      if (!materials.has(part.material)) materials.set(part.material, part.material.clone());
+      part.material = materials.get(part.material);
+    });
+    model.userData.fadeMaterials = [...materials.values()];
     scene.add(model);
     return model;
   }));
@@ -122,10 +180,10 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     passenger.name = 'lift-passenger';
     passenger.userData.seat = lane;
     passenger.position.set(x, -chairDrop + .12, 0);
-    chair.add(passenger);
+    chair.getObjectByName('chair-carrier').add(passenger);
     return passenger;
   }));
-  let previousLead = -1;
+
   const entry = new THREE.Vector2();
   const ahead = new THREE.Vector2();
   const tangent = new THREE.Vector2();
@@ -147,7 +205,7 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
       model.rotation.set(
         Math.atan2(terrainHeight(x+tangent.x*.4,along+tangent.y*.4)-terrainHeight(x,along),.4),
         Math.atan2(-tangent.x,tangent.y)+lean*.26,0,'YXZ');
-      const body=model.getObjectByName('body');
+      const body=bodies.get(model);
       const snowboard = model.userData.snowboard;
       body.rotation.z = snowboard ? 0 : -lean*.25;
       body.rotation.x = snowboard ? lean*.18 - .10 : 0;
@@ -156,56 +214,97 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     }
   }
 
-  function updateBoarding(distances, riderChair) {
-    let first = -Infinity;
-    let leadChair = -1;
-    const { start, boarding, unloading, boardingStart, loopLength, x, waitingOffset } = station;
-    const reservedSeat = quad ? 1 : 0;
-    for (const [index, distance] of distances.entries()) {
-      const along = start + THREE.MathUtils.euclideanModulo(distance, loopLength);
-      const onUphill = along <= unloading + 3;
-      if (onUphill && along <= boarding && along > first) {
-        first = along;
-        leadChair = index;
-      }
-      seated[index].forEach((passenger, lane) => {
-        passenger.visible = onUphill && along >= boarding && !(index === riderChair && lane === reservedSeat);
-      });
-    }
+  let boardingChair = -1;
+  const lastLap = new Array(chairs.length);
+  const laneSteps = seatXs.map(() => -Infinity);
+  const seatStyles = chairs.map(() => seatXs.map(() => null));
+  const reservedSeat = quad ? 1 : 0;
 
-    if (previousLead !== -1 && previousLead !== leadChair && seated[previousLead].some(person => person.visible)) {
-      queue.forEach((lane, index) => {
-        if (previousLead !== riderChair || index !== reservedSeat) lane.push(lane.shift());
-      });
-    }
-    previousLead = leadChair;
-    const permission = leadChair !== -1 && first >= boardingStart;
-    const join = permission ? THREE.MathUtils.smoothstep(first, boardingStart, boarding) : 0;
-    queue.forEach((lane, laneIndex) => {
-      if (permission) {
-        const passenger = seated[leadChair][laneIndex];
-        const jacket = lane[0].getObjectByName('body').children[0].material;
-        const snowboard = lane[0].userData.snowboard;
-        for (const part of passenger.children) {
-          if (jackets.includes(part.material)) part.material = jacket;
-          if (part.name === 'passenger-ski') part.visible = !snowboard;
-          if (part.name === 'passenger-board') part.visible = snowboard;
-        }
+  function advanceBoarding(distances, riderChair, travel) {
+    const { start, boardingContact, loopLength } = station;
+    distances.forEach((distance, index) => {
+      const lap = Math.floor((distance + start - boardingContact) / loopLength);
+      if (lastLap[index] !== undefined && lap > lastLap[index]) {
+        boardingChair = index;
+        queue.forEach((lane, seat) => {
+          if (index === riderChair && seat === reservedSeat) return;
+          seatStyles[index][seat] = lane[0];
+          lane.push(lane.shift());
+          laneSteps[seat] = travel;
+        });
       }
-      lane.forEach((person, row) => {
-        const boardingPerson = row === 0 && (leadChair !== riderChair || laneIndex !== reservedSeat);
-        const advance = boardingPerson ? join : 0;
-        const along = boarding + .14 - row * 1.22;
-        const px = x + seatXs[laneIndex] + waitingOffset * (1 - advance);
-        const floor = Math.max(station.platformY, terrainHeight(px, along));
-        person.visible = advance < .995 && !(permission && row === 0 && !boardingPerson);
-        person.position.set(px, floor + .035 + .49 * advance, -along);
-        person.rotation.y = -.24 * Math.sin(advance * Math.PI);
-        person.getObjectByName('body').rotation.x = .28 * advance;
-      });
+      lastLap[index] = lap;
     });
-    return permission;
   }
 
-  return { updateSkiers, updateBoarding };
+  function updateBoarding(distances, riderChair, playerRow, queueState, travel) {
+    const { start, boardingContact, unloading, loopLength, loadingStop, climbStart, x, waitingDepth, waitingOffset } = station;
+    const platformYAlong = along => along <= loadingStop + 1.1 ? station.platformY : -Infinity;
+    seated.forEach((seats, index) => {
+      const along = start + THREE.MathUtils.euclideanModulo(distances[index], loopLength);
+      seats.forEach((passenger, seat) => {
+        passenger.visible = along >= boardingContact && along <= unloading + 3 && !(index === riderChair && seat === reservedSeat);
+        const model = seatStyles[index][seat];
+        if (passenger.visible) {
+          const sit = index === boardingChair ? THREE.MathUtils.smoothstep(queueState.sinceContact, 0, .55) : 1;
+          const contactDistance = along - boardingContact;
+          passenger.position.y = -chairDrop + .12 + .10 * (1 - sit);
+          passenger.position.z = (contactDistance - (loadingStop - boardingContact)) * (1 - sit);
+          const snowY = contactDistance < 65
+            ? Math.max(platformYAlong(along), terrainHeight(chairs[index].position.x + seatXs[seat], along + .40))
+            : -Infinity;
+          const releaseStart = quad ? loadingStop + 1.1 : climbStart;
+          const release = THREE.MathUtils.smoothstep(along, releaseStart, releaseStart + 3);
+          poseSitting(passenger, sit, snowY - chairs[index].position.y, release, quad);
+        }
+        if (!model || passenger.userData.styleId === model.id) return;
+        passenger.userData.styleId = model.id;
+        for (const part of passenger.children) {
+          if (jackets.includes(part.material)) part.material = model.userData.jacket;
+          if (part.name === 'passenger-ski') part.visible = !model.userData.snowboard;
+          if (part.name === 'passenger-board') part.visible = model.userData.snowboard;
+        }
+      });
+    });
+    queue.forEach((lane, laneIndex) => {
+      const shuffle = THREE.MathUtils.smoothstep(travel - laneSteps[laneIndex], 0, .8);
+      lane.forEach((person, row) => {
+        const position = row + Number(laneIndex === reservedSeat && playerRow >= 0 && row >= playerRow);
+        const boardingPerson = position === (queueState.early ? 1 : 0);
+        const advance = queueState.early && position === 0 ? 1
+          : boardingPerson ? queueState.progress : 0;
+        const fade = row === lane.length - 1 ? shuffle : 1;
+        person.visible = fade > 0;
+        for (const surface of person.userData.fadeMaterials) {
+          surface.opacity = fade;
+          const transparent = fade < 1;
+          if (surface.transparent !== transparent) {
+            surface.transparent = transparent;
+            surface.depthWrite = !transparent;
+            surface.needsUpdate = true;
+          }
+        }
+        const along = Math.min(loadingStop, loadingStop - waitingDepth * (1 - advance) - (position + 1 - shuffle) * queueSpacing);
+        const px = x + seatXs[laneIndex] + waitingOffset * (1 - advance);
+        const floor = Math.max(station.platformY, terrainHeight(px, along));
+        person.position.set(px, floor + .035, -along);
+        person.rotation.y = boardingPerson && advance > 0
+          ? Math.atan2(waitingOffset, waitingDepth) * (1 - advance) : 0;
+        bodies.get(person).rotation.x = .12 * Math.sin(Math.PI * advance);
+      });
+    });
+  }
+
+  return { updateSkiers, advanceBoarding, updateBoarding };
+}
+
+export function createPlayerModel(scene) {
+  const standing = skier(1, false);
+  const seated = seatedSkier(1);
+  standing.name = 'player-standing';
+  seated.name = 'player-seated';
+  scene.add(standing, seated);
+  standing.visible = false;
+  seated.visible = false;
+  return { standing, seated };
 }

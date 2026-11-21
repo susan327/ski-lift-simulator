@@ -1,9 +1,16 @@
 import * as THREE from './node_modules/three/build/three.module.js';
-import { courses, places, liftGround, terrainHeight, nearCourse, quadLiftGround, quadLine, pairLine, slopeAlong, slopeWidthScale,
-  quadExitLength, quadExitPose, quadGlideLength } from './resort.js';
-import { createLiftMotion } from './lift-motion.js';
-import { createPopulation } from './people.js';
-import { createChairModel, addSheaveTrain, addBullwheelDetails, gripCamContact, poseDetachableGrip } from './lift-model.js';
+import { courses, terrainHeight } from './resort.js';
+import { addResortTerrain, addResortScenery } from './resort-view.js';
+import { createLiftOperations } from './lift-operation.js';
+import { createStationView } from './station-view.js';
+import { createRideCamera } from './ride-camera.js';
+import { createSkiRun } from './ski-run.js';
+import { createRideAudio } from './ride-audio.js';
+import * as pairChime from './ping1.mjs';
+import * as quadChime from './ping2.mjs';
+import * as jointClip from './joint.mjs';
+import { createPopulation, createPlayerModel, poseSitting, queueSpacing } from './people.js';
+import { createChairModel, chairParts, poseDetachableGrip } from './lift-model.js';
 
 const liftSelect = document.querySelector('#lift-choice');
 const quad = new URLSearchParams(location.search).get('lift') === 'quad';
@@ -15,96 +22,55 @@ liftSelect.addEventListener('change', () => {
   location.assign(url);
 });
 
-const lower = quad ? places.quadBase : places.pairBase;
-const upper = quad ? places.quadTop : places.pairTop;
-const boarding = lower.along;
-const unloading = upper.along;
-const start = boarding - 10;
-const end = unloading + 10;
-const climbStart = quad ? quadLine.climbStart : pairLine.climbStart;
-const climbEnd = quad ? quadLine.climbEnd : pairLine.climbEnd;
-const boardingStart = boarding - 2.4;
-const exitEnd = unloading + 3;
-const mainSpeed = quad ? 5 : 2.4;
-const stationSpeed = quad ? 0.85 : mainSpeed;
-const cableHeight = quad ? 5.1 : 4.4;
-const chairDrop = quad ? 4.15 : 3.8;
-const chairCount = quad ? 7 : 8;
-const wheelRadius = quad ? 2.65 : 2;
-const lineLength = end - start;
-const turnLength = Math.PI * wheelRadius;
-const loopLength = 2 * (lineLength + turnLength);
-const baseTurn = 2 * lineLength + turnLength;
-const railDrop = quad ? 0.36 : 0;
-const glideSeconds = 5.6;
-
-function lineX(along) {
-  const t = THREE.MathUtils.smoothstep(along, climbStart, climbEnd);
-  return THREE.MathUtils.lerp(lower.x, upper.x, t);
-}
-
-const trackGround = quad ? quadLiftGround : liftGround;
-const summit = trackGround(unloading);
-
-function terminalWeight(distance) {
-  const d = THREE.MathUtils.euclideanModulo(distance, loopLength);
-  const along = d <= lineLength ? start + d : end - (d - lineLength - turnLength);
-  if (d > lineLength && d < lineLength + turnLength || d >= baseTurn) return 1;
-  const leaving = THREE.MathUtils.smoothstep(along, boarding + 4, boarding + 15);
-  const arriving = THREE.MathUtils.smoothstep(along, unloading - 16, unloading - 4);
-  return Math.max(1 - leaving, arriving);
-}
-
-function speedAt(distance) {
-  return THREE.MathUtils.lerp(mainSpeed, stationSpeed, terminalWeight(distance));
-}
-
-// Distance from the speed match point, positive toward the open line.
-const handoff = { aligned: 5.4, clamped: 9.8, railEnd: 13.8 };
-
-function handoffDistance(distance) {
-  const d = THREE.MathUtils.euclideanModulo(distance, loopLength);
-  if ((d > lineLength && d < lineLength + turnLength) || d >= baseTurn) return -Infinity;
-  const along = d <= lineLength ? start + d : end - (d - lineLength - turnLength);
-  return Math.min(along - (boarding + 15), unloading - 16 - along);
-}
-
-function railSupport(distance) {
-  return 1 - THREE.MathUtils.smoothstep(handoffDistance(distance), 0, handoff.aligned);
-}
-
-function gripOpen(distance) {
-  return 1 - THREE.MathUtils.smoothstep(handoffDistance(distance), handoff.aligned, handoff.clamped);
-}
-
-function railFall(distance) {
-  return 0.14 * THREE.MathUtils.smoothstep(handoffDistance(distance), handoff.clamped, handoff.railEnd);
-}
-
-const motion = createLiftMotion(loopLength, speedAt);
-const quadUnloadTime = motion.secondsAt(unloading - start);
+const operations = createLiftOperations(quad);
+const { lower, boarding, loadingStop, boardingContact, unloading, start, climbStart, chairDrop, chairCount, loopLength } = operations.config;
+const { state, chairDistances, liftPose, mechanicsAt } = operations;
 
 const canvas = document.querySelector('#view');
 const status = document.querySelector('#status');
 const speedControl = document.querySelector('#speed');
 const gripView = document.querySelector('#grip-view');
-gripView.hidden = !quad;
-let inspectingGrip = false;
-gripView.addEventListener('click', () => {
-  inspectingGrip = !inspectingGrip;
-  gripView.setAttribute('aria-pressed', String(inspectingGrip));
-  gripView.textContent = inspectingGrip ? '乗車視点に戻る' : '握索機を見る';
-});
 const finish = document.querySelector('#finish');
 const restart = document.querySelector('#restart');
+const skiButton = document.querySelector('#start-ski');
+const skiReturn = document.querySelector('#ski-return');
+const skiControls = document.querySelector('#ski-controls');
+const lookHelp = document.querySelector('#look-help');
+const ski = createSkiRun();
+const skiKeys = { ArrowLeft:'left', ArrowRight:'right', ArrowUp:'push', ArrowDown:'brake' };
+const heldKeys = new Set();
+const heldButtons = new Map();
+
+function clearSkiInput() {
+  heldKeys.clear();
+  heldButtons.clear();
+}
+
+window.addEventListener('blur', clearSkiInput);
+window.addEventListener('keydown', event => {
+  if (!ski.state.running || trailMap.open || !skiKeys[event.key]) return;
+  event.preventDefault();
+  heldKeys.add(skiKeys[event.key]);
+});
+window.addEventListener('keyup', event => heldKeys.delete(skiKeys[event.key]));
+for (const button of skiControls.querySelectorAll('button')) {
+  button.addEventListener('pointerdown', event => {
+    button.setPointerCapture(event.pointerId);
+    heldButtons.set(event.pointerId, button.dataset.ski);
+  });
+  button.addEventListener('lostpointercapture', event => heldButtons.delete(event.pointerId));
+}
+
+function skiingInput() {
+  const active = new Set([...heldKeys, ...heldButtons.values()]);
+  return Object.fromEntries(Array.from(active, key => [key,true]));
+}
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa6d7ed);
 scene.fog = new THREE.FogExp2(0xb9d8ea, 0.0018);
-const camera = new THREE.PerspectiveCamera(67, 1, 0.07, 980);
-camera.rotation.order = 'YXZ';
 scene.add(new THREE.HemisphereLight(0xffffff, 0x7896ab, 2));
 const sun = new THREE.DirectionalLight(0xfff1d9, 2);
 sun.position.set(-30, 45, 20);
@@ -114,13 +80,9 @@ function material(color) {
   return new THREE.MeshStandardMaterial({ color, flatShading: true });
 }
 
-const snow = material(0xecf6fc);
 const steel = material(0x34525b);
 const orange = material(0xce542f);
 const dark = material(0x252f35);
-const pine = material(0x254943);
-const bark = material(0x51463d);
-const trailMarkers = new Map(courses.map(course => [course.level, material(course.color)]));
 
 function mesh(geometry, surface, x, y, z, parent = scene) {
   const object = new THREE.Mesh(geometry, surface);
@@ -133,409 +95,94 @@ function box(width, height, depth, surface, x, y, z, parent) {
   return mesh(new THREE.BoxGeometry(width, height, depth), surface, x, y, z, parent);
 }
 
-function liftPose(distance, position) {
-  const d = THREE.MathUtils.euclideanModulo(distance, loopLength);
-  if (d <= lineLength) {
-    const along = start + d;
-    position.set(lineX(along), trackGround(along) + cableHeight, -along);
-    return -Math.atan2(lineX(along + 0.1) - lineX(along - 0.1), 0.2);
-  }
-  if (d < lineLength + turnLength) {
-    const angle = (d - lineLength) / wheelRadius;
-    position.set(upper.x + wheelRadius * (Math.cos(angle) - 1), summit + cableHeight, -end - wheelRadius * Math.sin(angle));
-    return angle;
-  }
-  if (d <= 2 * lineLength + turnLength) {
-    const along = end - (d - lineLength - turnLength);
-    position.set(lineX(along) - 2 * wheelRadius, trackGround(along) + cableHeight, -along);
-    return Math.PI - Math.atan2(lineX(along + 0.1) - lineX(along - 0.1), 0.2);
-  }
-  const angle = (d - 2 * lineLength - turnLength) / wheelRadius;
-  position.set(lower.x - wheelRadius * (1 + Math.cos(angle)), trackGround(boarding) + cableHeight, -start + wheelRadius * Math.sin(angle));
-  return Math.PI + angle;
-}
+addResortTerrain(scene);
 
-const terrain = new THREE.PlaneGeometry(360, 820, 240, 490);
-terrain.rotateX(-Math.PI / 2);
-terrain.translate(35, 0, -30);
-const vertices = terrain.attributes.position;
-const colors = [];
-const tint = new THREE.Color();
-for (let i = 0; i < vertices.count; i++) {
-  const x = vertices.getX(i);
-  const along = -vertices.getZ(i);
-  const y = terrainHeight(x, along);
-  vertices.setY(i, y);
-  const shade = terrainHeight(x - 0.8, along - 0.6) - y;
-  const snowVariation = Math.sin(x*0.58+along*0.29)*Math.sin(along*0.33+x*0.14)*0.018;
-  tint.set(0xdcecf5).lerp(snow.color, THREE.MathUtils.clamp(0.53 + shade*1.9, 0, 1));
-  tint.multiplyScalar(0.98 + snowVariation);
-  colors.push(tint.r, tint.g, tint.b);
-}
-terrain.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-terrain.computeVertexNormals();
-mesh(terrain, new THREE.MeshStandardMaterial({ vertexColors: true }), 0, 0, 0);
+const station = createStationView(scene, operations, { mesh, box, material, steel, orange, dark });
+const audio = createRideAudio(document.querySelector('#ambient'), quad ? quadChime : pairChime, jointClip, quad ? {
+  boarding: './announcements/01-boarding.wav',
+  approaching: './announcements/02-approaching.wav',
+  unloading: './announcements/03-unloading.wav',
+} : null, station.speakers);
+const { seatXs, waitingDepth, waitingOffset, platformY } = station;
+const rideCamera = createRideCamera(canvas, gripView, operations.config, station);
+const { camera } = rideCamera;
+const player = createPlayerModel(scene);
+const viewMode = document.querySelector('#view-mode');
+const staffView = document.querySelector('#staff-view');
+staffView.addEventListener('change', () => {
+  const active = Boolean(staffView.value);
+  rideCamera.reset();
+  lookHelp.hidden = false;
+  viewMode.disabled = active;
+  gripView.disabled = active;
+  if (active) rideCamera.setInspection(false);
+});
+let thirdPerson = false;
+const playerTarget = new THREE.Vector3();
 
-const seatXs = quad ? [-.96, -.32, .32, .96] : [-.375, .375];
-const waitingOffset = quad ? 3.25 : 2.55;
-const platformY = trackGround(boarding) + .045;
-const stationWidth = waitingOffset + (quad ? 3.25 : 2.5);
-box(stationWidth, .16, 6.2, steel, lower.x + waitingOffset / 2,
-  platformY - .08, -boarding + .73);
-if (!quad) {
-  box(4, .16, 3, steel, upper.x + 1.65, summit - .035, -unloading);
-  box(.18, 1.4, .18, steel, upper.x - 1.25, summit + .7, -unloading - 1);
-  box(.72, .42, .16, orange, upper.x - 1.25, summit + 1.4, -unloading - 1);
-}
+function updateThirdPerson(state, chair, skier, pose) {
+  const active = !staffView.value && thirdPerson && !rideCamera.isInspecting();
+  const sitting = active && state.phase === 'riding' && !skier.running && !skier.arrived;
+  player.seated.visible = sitting;
+  player.standing.visible = active && !sitting;
+  if (!active) return;
 
-const laneColors = [material(0x24b978), material(0xf49b33)];
-const whitePaint = material(0xf1f7f9);
-const signalBody = material(0x192c31);
-const lampRed = new THREE.MeshStandardMaterial({ color: 0xd52129, emissive: 0xff1521 });
-const lampGreen = new THREE.MeshStandardMaterial({ color: 0x0beb7a, emissive: 0x00ff66 });
-const signalX = lower.x + .16;
-const signalZ = -boarding - 1.23;
-for (const [index, seatX] of seatXs.entries()) {
-  const paint = laneColors[index % laneColors.length];
-  const width = quad ? .60 : .71;
-  box(width, .018, .25, paint, lower.x + seatX, platformY + .011, -boarding - .57).name = 'boarding-stop-color';
-  box(width, .018, .22, paint, lower.x + seatX + waitingOffset, platformY + .011, -boarding - .57).name = 'boarding-wait-color';
-  for (let mark = 1; mark <= 3; mark++) {
-    box(.055, .015, .42, paint, lower.x + seatX + waitingOffset,
-      platformY + .01, -boarding + mark * .84);
-  }
-}
-const stripeHalf = (quad ? 1.29 : .76);
-box(stripeHalf * 2, .016, .067, whitePaint, lower.x, platformY + .01, -boarding - .78);
-box(stripeHalf * 2, .016, .067, whitePaint, lower.x + waitingOffset, platformY + .01, -boarding - .78);
-for (let mark = 0; mark < 5; mark++) {
-  const x = lower.x + .53 + mark * (waitingOffset - .8) / 4;
-  box(.24, .015, .045, whitePaint, x, platformY + .01, -boarding - .13);
-  if (mark === 0) {
-    for (const sign of [-1, 1]) {
-      box(.16, .015, .045, whitePaint, x - .08, platformY + .01, -boarding - .13 + sign * .055).rotation.y = sign * .52;
+  let yaw = pose.heading;
+  if (sitting) {
+    const seatX = seatXs[quad ? 1 : 0];
+    yaw = chair.parent.rotation.y;
+    player.seated.position.set(seatX, -chairDrop + .12, 0);
+    chair.localToWorld(player.seated.position);
+    const settle = 1 - state.sitProgress;
+    player.seated.position.y += .10 * settle;
+    player.seated.position.z += (state.along - loadingStop) * settle;
+    const snowY = state.along < boarding + 65
+      ? Math.max(state.along <= loadingStop + 1.1 ? platformY : -Infinity,
+        terrainHeight(player.seated.position.x, -player.seated.position.z + .40))
+      : -Infinity;
+    const releaseStart = quad ? loadingStop + 1.1 : climbStart;
+    const release = THREE.MathUtils.smoothstep(state.along, releaseStart, releaseStart + 3);
+    poseSitting(player.seated, state.sitProgress, snowY, release, quad);
+    player.seated.rotation.set(chair.rotation.x, yaw, 0, 'YXZ');
+    playerTarget.copy(player.seated.position);
+    playerTarget.y += .58;
+  } else {
+    player.standing.position.copy(pose.position);
+    player.standing.position.y -= 1.58;
+    let pitch = 0;
+    if (skier.running || skier.arrived) {
+      player.standing.position.y += .17;
+      const ahead = terrainHeight(skier.x - Math.sin(yaw) * .5, skier.along + Math.cos(yaw) * .5);
+      pitch = Math.atan2(ahead - terrainHeight(skier.x, skier.along), .5);
     }
+    player.standing.rotation.set(pitch, yaw, skier.running ? skier.lean : 0, 'YXZ');
+    playerTarget.copy(player.standing.position);
+    playerTarget.y += .98;
   }
-}
-const poleX = lower.x - (quad ? 1.76 : 1.12);
-box(.13, 2.95, .13, steel, poleX, platformY + 1.475, signalZ);
-box(signalX - poleX + .32, .09, .09, steel, (signalX + poleX) / 2, platformY + 2.86, signalZ);
-box(.72, .30, .19, signalBody, signalX, platformY + 2.63, signalZ);
-for (const [index, lamp] of [lampRed, lampGreen].entries()) {
-  const x = signalX + (index - .5) * .29;
-  const lens = mesh(new THREE.CylinderGeometry(.112,.112,.055,22), lamp, x, platformY + 2.63, signalZ + .113);
-  lens.name = index === 0 ? 'boarding-light-red' : 'boarding-light-green';
-  lens.rotation.x = Math.PI / 2;
-}
-let signalPermitted;
-function updateBoardingSignal(permitted) {
-  if (signalPermitted === permitted) return;
-  signalPermitted = permitted;
-  lampRed.color.setHex(permitted ? 0x310e12 : 0xd52129);
-  lampRed.emissiveIntensity = permitted ? .006 : 1.7;
-  lampGreen.color.setHex(permitted ? 0x0beb7a : 0x0d3325);
-  lampGreen.emissiveIntensity = permitted ? 1.7 : .006;
+  const distance = sitting ? 2.65 : state.phase === 'waiting' ? 2.25 : 2.9;
+  camera.position.copy(playerTarget);
+  camera.position.x += Math.sin(yaw)*distance;
+  camera.position.z += Math.cos(yaw)*distance;
+  camera.position.y += sitting ? .53 : state.phase === 'waiting' ? 1.25 : .93;
+  rideCamera.orbitAround(playerTarget);
 }
 
-for (const course of courses) {
-  const trailVertices = [];
-  const trailIndices = [];
-  const surface = material(0xd9e9f1);
-  for (const [i, [x, along]] of course.samples.entries()) {
-    const before = course.samples[Math.max(0, i - 1)];
-    const after = course.samples[Math.min(course.samples.length - 1, i + 1)];
-    const dx = after[0] - before[0];
-    const dy = after[1] - before[1];
-    const width = course.width / (2 * Math.hypot(dx, dy));
-    for (const side of [-1, 1]) {
-      const edgeX = x - side * dy * width;
-      const edgeAlong = along + side * dx * width;
-      trailVertices.push(edgeX, terrainHeight(edgeX, edgeAlong) + 0.15, -edgeAlong);
-    }
-    const v = i * 2;
-    if (i > 0) trailIndices.push(v - 2, v, v - 1, v - 1, v, v + 1);
+viewMode.addEventListener('click', () => {
+  thirdPerson = !thirdPerson;
+  rideCamera.reset();
+  lookHelp.hidden = false;
+  if (thirdPerson) rideCamera.setInspection(false);
+  viewMode.setAttribute('aria-pressed', String(thirdPerson));
+  viewMode.textContent = thirdPerson ? '一人称視点' : '三人称視点';
+});
+gripView.addEventListener('click', () => {
+  if (!rideCamera.isInspecting()) return;
+  thirdPerson = false;
+  viewMode.setAttribute('aria-pressed','false');
+  viewMode.textContent = '三人称視点';
+});
 
-    if (i > 8 && i % 30 === 0) {
-      const markerX = x + dy * width * 1.14;
-      const markerAlong = along - dx * width * 1.14;
-      const y = terrainHeight(markerX, markerAlong);
-      box(0.065, 0.94, 0.065, steel, markerX, y + 0.45, -markerAlong);
-      box(0.26, 0.22, 0.11, trailMarkers.get(course.level), markerX, y + 0.86, -markerAlong);
-    }
-  }
-  const trail = new THREE.BufferGeometry();
-  trail.setAttribute('position', new THREE.Float32BufferAttribute(trailVertices, 3));
-  trail.setIndex(trailIndices);
-  trail.computeVertexNormals();
-  const path = mesh(trail, surface, 0, 0, 0);
-  path.name = course.name;
-}
-
-const signCanvas = document.createElement('canvas');
-signCanvas.width = 512;
-signCanvas.height = 256;
-const signInk = signCanvas.getContext('2d');
-signInk.fillStyle = '#19464d';
-signInk.fillRect(0, 0, 512, 256);
-signInk.strokeStyle = '#d1e8ed';
-signInk.lineWidth = 8;
-signInk.strokeRect(13, 13, 486, 230);
-signInk.fillStyle = '#ffffff';
-signInk.textAlign = 'center';
-signInk.font = 'bold 52px sans-serif';
-signInk.fillText(courses[0].name, 256, 107);
-signInk.font = 'bold 34px sans-serif';
-signInk.fillText('初級コース  ↘', 256, 178);
-const signTexture = new THREE.CanvasTexture(signCanvas);
-signTexture.colorSpace = THREE.SRGBColorSpace;
-const trailSign = new THREE.Group();
-const signAlong = places.pairTop.along + 3;
-trailSign.position.set(7.6, terrainHeight(7.6, signAlong), -signAlong);
-trailSign.rotation.y = -Math.PI / 2;
-scene.add(trailSign);
-for (const x of [-0.53, 0.53]) {
-  box(0.09, 1.60, 0.09, steel, x, 0.8, 0, trailSign);
-}
-mesh(new THREE.PlaneGeometry(1.8, 0.9), new THREE.MeshBasicMaterial({ map: signTexture }),
-  0, 1.53, 0.052, trailSign);
-
-if (quad) {
-  const edge = material(0x239497);
-  const flag = material(0xe67d37);
-  for (let d = 3; d < quadExitLength - 2; d += 1.7) {
-    const point = quadExitPose(d);
-    const offsetX = Math.cos(point.yaw) * 2.05;
-    const offsetAlong = Math.sin(point.yaw) * 2.05;
-    for (const side of [-1, 1]) {
-      const x = point.x + offsetX * side;
-      const along = point.along + offsetAlong * side;
-      const floor = terrainHeight(x, along);
-      box(0.08, 0.85, 0.08, edge, x, floor + 0.42, -along);
-      box(0.26, 0.26, 0.06, flag, x, floor + 0.77, -along).rotation.y = point.yaw;
-    }
-  }
-}
-
-const cable = new THREE.Group();
-cable.name = 'lift-cable';
-scene.add(cable);
-const up = new THREE.Vector3(0, 1, 0);
-
-function addCableSpan(from, to, surface = dark, radius = 0.045) {
-  const direction = new THREE.Vector3().subVectors(to, from);
-  const midpoint = from.clone().lerp(to, 0.5);
-  const span = mesh(new THREE.CylinderGeometry(radius, radius, direction.length() + 0.02, 8),
-    surface, midpoint.x, midpoint.y, midpoint.z, cable);
-  span.quaternion.setFromUnitVectors(up, direction.normalize());
-}
-
-function cablePosition(distance) {
-  const point = new THREE.Vector3();
-  liftPose(distance, point);
-  return point;
-}
-
-const summitTurn = lineLength;
-const stops = quad
-  ? Array.from({ length: Math.ceil(lineLength / 2) + 1 }, (_, i) => Math.min(i * 2, lineLength))
-  : [0, climbStart - start, climbEnd - start, summitTurn];
-for (const distances of [stops, stops.toReversed().map(d => baseTurn - d)]) {
-  for (let i = 1; i < distances.length; i++) {
-    addCableSpan(cablePosition(distances[i - 1]), cablePosition(distances[i]));
-  }
-}
-
-const driveTires = [];
-
-function conveyorPoint(distance, side, height) {
-  const point = new THREE.Vector3();
-  const yaw = liftPose(distance, point);
-  point.x += side * Math.cos(yaw);
-  point.z -= side * Math.sin(yaw);
-  point.y += height - railDrop * railSupport(distance);
-  return point;
-}
-
-if (quad) {
-  const rail = material(0x36717c);
-  const railHead = material(0x8e9ba0);
-  const tread = new THREE.MeshStandardMaterial({ color: 0x23292e, roughness: 0.82 });
-  const hub = new THREE.MeshStandardMaterial({ color: 0xbfc5c5, roughness: 0.45, metalness: 0.3 });
-  const stripe = material(0xd89956);
-  const tireRadius = 0.145;
-  const camSteel = material(0xc4a477);
-  const tireGeometry = new THREE.CylinderGeometry(tireRadius, tireRadius, 0.19, 20);
-  const hubGeometry = new THREE.CylinderGeometry(0.081, 0.081, 0.041, 16);
-  const segments = Math.ceil(loopLength / 0.40);
-  for (let i = 0; i < segments; i++) {
-    const from = i * loopLength / segments;
-    const to = (i + 1) * loopLength / segments;
-    const d = (from + to) / 2;
-    if (handoffDistance(d) >= handoff.railEnd) continue;
-    for (const side of [-0.21, 0.21]) {
-      addCableSpan(conveyorPoint(from, side, -0.05 - railFall(from)),
-        conveyorPoint(to, side, -0.05 - railFall(to)), rail, 0.089);
-      addCableSpan(conveyorPoint(from, side, 0.014 - railFall(from)),
-        conveyorPoint(to, side, 0.014 - railFall(to)), railHead, 0.032);
-    }
-    if (handoffDistance(d) >= handoff.clamped) continue;
-    const camA = gripCamContact(gripOpen(from));
-    const camB = gripCamContact(gripOpen(to));
-    addCableSpan(conveyorPoint(from, camA.side, camA.height + 0.038),
-      conveyorPoint(to, camB.side, camB.height + 0.038), camSteel, 0.038);
-    if (i % 2 !== 0) continue;
-    const housing = new THREE.Group();
-    housing.name = 'quad-drive-tire';
-    housing.position.copy(conveyorPoint(d, 0.15, 0.355));
-    housing.rotation.y = liftPose(d, new THREE.Vector3());
-    cable.add(housing);
-    const rotor = new THREE.Group();
-    rotor.name = 'quad-tire-rotor';
-    housing.add(rotor);
-    mesh(tireGeometry, tread, 0, 0, 0, rotor).rotation.z = Math.PI / 2;
-    mesh(hubGeometry, hub, 0.102, 0, 0, rotor).rotation.z = Math.PI / 2;
-    box(0.016, 0.048, 0.031, stripe, 0.129, 0.071, 0, rotor);
-    driveTires.push({ rotor, rate: speedAt(d) / tireRadius });
-    if (i % 6 === 0) {
-      box(0.69, 0.11, 0.21, steel, 0, 0.22, 0, housing);
-      box(0.10, 0.26, 0.15, steel, 0.29, 0.12, 0, housing);
-    }
-  }
-}
-
-const wheels = [];
-for (const [index, turnStart] of [summitTurn, baseTurn].entries()) {
-  const along = index === 0 ? end : start;
-  const y = trackGround(along);
-  const z = -along;
-  const x = lineX(along) - wheelRadius;
-  const ground = terrainHeight(x, along);
-  const height = y - ground + cableHeight + 0.48;
-  box(0.62, height, 0.62, steel, x, ground + height / 2, z);
-  box(1.4, 0.42, 1.28, steel, x, y + cableHeight + 0.40, z);
-  if (quad) {
-    const stationRoof = material(0x225460);
-    const roofZ = z + (index === 0 ? 5.5 : -5.5);
-    box(9.2, 0.24, 17, stationRoof, x, y + cableHeight + 1.15, roofZ);
-    for (const offset of [-4.25, 4.25]) {
-      for (const shift of [-6, 6]) {
-        const floor = terrainHeight(x + offset, -roofZ - shift);
-        const pole = y + cableHeight + 1.15 - floor;
-        box(0.28, pole, 0.30, steel, x + offset, floor + pole / 2, roofZ + shift);
-      }
-    }
-    for (const offset of [-3.35, 3.35]) {
-      box(0.16, 0.32, 16.8, steel, x + offset, y + cableHeight + 0.78, roofZ);
-    }
-  }
-  const wheel = new THREE.Group();
-  wheel.name = index === 0 ? 'summit-wheel' : 'base-wheel';
-  wheel.position.set(x, y + cableHeight + 0.08, z);
-  scene.add(wheel);
-  wheels.push(wheel);
-  addBullwheelDetails(wheel, wheelRadius);
-  for (let i = 0; i < 32; i++) {
-    addCableSpan(cablePosition(turnStart + i * turnLength / 32), cablePosition(turnStart + (i + 1) * turnLength / 32));
-  }
-}
-
-for (const along of quad ? [-264, -210, -153, -95, -35, 26, 90, 151, 213, 269, 321] : [35, 75, 116, 159, 203, 246]) {
-  const y = trackGround(along);
-  const x = lineX(along) - wheelRadius;
-  const ground = terrainHeight(x, along);
-  const height = y - ground + cableHeight + 0.42;
-  box(0.34, height, 0.34, steel, x, ground + height / 2, -along);
-  box(wheelRadius * 2 + 0.44, 0.19, 0.34, steel, x, y + cableHeight + 0.59, -along);
-  for (const side of [-1, 1]) addSheaveTrain(scene, x + side * wheelRadius, y + cableHeight, -along);
-}
-
-const canopy = new THREE.ConeGeometry(1.28, 2.4, 7);
-const trunk = new THREE.CylinderGeometry(0.10, 0.15, 1.1, 6);
-
-function plantTree(x, along, scale) {
-  const ground = terrainHeight(x, along);
-  const tree = new THREE.Group();
-  tree.position.set(x, ground, -along);
-  tree.scale.setScalar(scale);
-  tree.rotation.y = along * 0.5 + x;
-  scene.add(tree);
-  mesh(trunk, bark, 0, 0.48, 0, tree);
-  for (let layer = 0; layer < 3; layer++) {
-    const size = 1 - layer * 0.19;
-    const y = 1.55 + layer * 0.8;
-    mesh(canopy, pine, 0, y, 0, tree).scale.setScalar(size);
-    mesh(canopy, snow, 0, y + 0.22, 0, tree).scale.set(size * 0.86, size * 0.92, size * 0.86);
-  }
-}
-
-for (let row = 0; row < 11; row++) {
-  for (const side of [-1, 1]) {
-    for (let col = 0; col < 3; col++) {
-      const along = slopeAlong(8 + row * 3.8 + Math.sin(row + col) * 1.4);
-      const x = side * (3.4 + col * 3.15 + Math.cos(row * 2 + col) * 0.55 + (side < 0 ? 4 : 0));
-      const scale = 0.92 + ((row + col * 2) % 5) * 0.14;
-      if (!nearCourse(x, along, 1.8)) plantTree(x, along, scale);
-    }
-  }
-}
-plantTree(-8, slopeAlong(53), 0.85);
-plantTree(5.6, slopeAlong(54), 0.75);
-
-for (let row = 0; row < 12; row++) {
-  for (let col = 0; col < 10; col++) {
-    const along = slopeAlong(7 + row * 7.5 + Math.sin(col * 1.7 + row) * 2);
-    const x = (14 + col * 5.8 + Math.cos(row * 1.7 + col) * 2) * slopeWidthScale;
-    const scale = 0.82 + ((col * 7 + row * 3) % 6) * 0.12;
-    const quadX = THREE.MathUtils.lerp(places.quadBase.x, places.quadTop.x,
-      THREE.MathUtils.smoothstep(along, quadLine.climbStart, quadLine.climbEnd));
-    const clearOfLift = x < quadX - 8.7 || x > quadX + 3.1;
-    if (along < slopeAlong(86) && clearOfLift && !nearCourse(x, along, 2.05)) plantTree(x, along, scale);
-  }
-}
-
-const lodge = new THREE.Group();
-const timber = material(0x795242);
-const roof = material(0x274d58);
-const glass = material(0x78aebf);
-lodge.position.set(places.base.x, terrainHeight(places.base.x, places.base.along), -places.base.along);
-scene.add(lodge);
-box(7.5, 2.8, 5.2, timber, 0, 1.4, 0, lodge);
-for (const side of [-1, 1]) {
-  const panel = box(4.5, 0.20, 5.8, roof, side * 1.95, 3.48, 0, lodge);
-  panel.rotation.z = -side * 0.32;
-  box(1.65, 1.08, 0.06, glass, side * 2.3, 1.53, -2.62, lodge);
-}
-box(1.0, 2.05, 0.09, steel, 0, 1.04, -2.63, lodge);
-box(0.34, 1.15, 0.36, steel, 2.35, 3.96, 0.74, lodge);
-
-const distantSnow = new THREE.MeshStandardMaterial({vertexColors:true,roughness:1});
-const ridgeShape = new THREE.PlaneGeometry(116, 64, 56, 30);
-ridgeShape.rotateX(-Math.PI / 2);
-const peakTint = new THREE.Color();
-for (const [x, along, height, rotation, seed] of [
-  [-43, 132, 57, 0.22, 2], [35, 171, 86, -0.31, 6], [93, 143, 64, 0.30, 5],
-  [155, 112, 79, 0.66, 8], [179, 35, 57, 0.95, 4], [238, 73, 92, 0.57, 10],
-]) {
-  const geometry = ridgeShape.clone();
-  const points = geometry.attributes.position;
-  const colors = [];
-  for (let i = 0; i < points.count; i++) {
-    const px = points.getX(i), pz=points.getZ(i);
-    const crest = 7 * Math.sin(px * 0.13 + seed) + 4 * Math.sin(px * 0.27 - seed);
-    const face = Math.max(0, 1 - Math.abs(pz-crest) / 25);
-    const spine = Math.max(0, 1 - Math.abs(px) / 58);
-    const teeth = 0.77 + 0.13 * Math.cos(px * 0.15 + seed) + 0.10 * Math.cos(px * 0.33 + seed);
-    const y = height * spine ** 0.72 * face ** 1.15 * teeth;
-    points.setY(i, y);
-    peakTint.set(0x7999b1).lerp(snow.color, THREE.MathUtils.smoothstep(y + 5*Math.sin(px * 0.35), height*.28,height*.54));
-    colors.push(peakTint.r,peakTint.g,peakTint.b);
-  }
-  geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  geometry.computeVertexNormals();
-  const range = mesh(geometry,distantSnow,x * 2.55,-1,-slopeAlong(along));
-  range.scale.set(2.6,2.0,2.5);
-  range.rotation.y=rotation;
-}
+addResortScenery(scene, { mesh, box, material, steel });
 
 const chairModel = createChairModel(quad, chairDrop);
 const chairs = Array.from({ length: chairCount }, (_, index) => {
@@ -544,30 +191,15 @@ const chairs = Array.from({ length: chairCount }, (_, index) => {
   scene.add(chair);
   return chair;
 });
+const parts = quad ? chairs.map(chairParts) : [];
+const carriers = chairs.map(chair => chair.getObjectByName('chair-carrier'));
+const skiEye = new THREE.Vector3();
 const population = createPopulation(scene, courses, terrainHeight, chairs, {
-  quad, chairDrop, start, boarding, boardingStart, unloading, loopLength, x: lower.x, platformY, seatXs, waitingOffset,
+  quad, chairDrop, start, loadingStop, boardingContact, unloading, loopLength, climbStart, x: lower.x, platformY, seatXs, waitingDepth, waitingOffset,
 });
-const chairDistances = new Float64Array(chairs.length);
-const seatSpacing = motion.duration / chairs.length;
-const boardingTime = motion.secondsAt(boardingStart - start);
 const speedReadout = document.querySelector('#line-speed');
-let travel = 0;
-let ropeTravel = 0;
-let boardingTravel = 0;
-let boardingChair = 0;
-let along = start;
-let phase;
+let shownPhase;
 let previousTime;
-const waitingEye = new THREE.Vector3(lower.x + waitingOffset * .47, trackGround(boarding) + 1.92, -boarding + 4.65);
-const seatedEye = new THREE.Vector3();
-const pose = new THREE.Vector3();
-const waitingYaw = -0.14;
-const overlookYaw = quad ? 2.25 : -1.83;
-let lookYaw = 0;
-let lookPitch = 0;
-let dragPointer;
-const inspectionOffset = new THREE.Vector3();
-const inspectionTarget = new THREE.Vector3();
 
 const labels = {
   waiting: '麓駅で待機中',
@@ -575,166 +207,160 @@ const labels = {
   riding: '乗車中 · 山頂へ上昇',
   unloading: quad ? '自動降車中 · 緩斜面へ' : '自動降車中',
   arrived: quad ? '山頂駅の滑り出し区間を通過' : '山頂駅で降車',
+  skiing: 'こもれび林間を滑走中',
+  skiArrived: '麓の広場に到着',
   finished: '体験終了',
 };
 
 function setPhase(next) {
-  phase = next;
+  shownPhase = next;
   status.textContent = labels[next];
   status.dataset.phase = next;
   finish.hidden = next !== 'arrived';
   restart.hidden = next !== 'finished';
-  speedControl.disabled = next === 'finished';
+  skiButton.hidden = quad || next !== 'arrived';
+  skiReturn.hidden = next !== 'skiArrived';
+  skiControls.hidden = next !== 'skiing';
+  lookHelp.hidden = !staffView.value && !thirdPerson && (next === 'skiing' || next === 'skiArrived');
+  speedControl.disabled = next === 'finished' || next === 'skiing' || next === 'skiArrived';
 }
 
 function begin() {
-  // Reserve the next chair with enough approach remaining for the boarding animation.
-  const nextSlot = Math.ceil((travel - boardingTime) / seatSpacing);
-  boardingTravel = nextSlot * seatSpacing;
-  boardingChair = THREE.MathUtils.euclideanModulo(-nextSlot, chairs.length);
-  along = start + motion.distanceAt(travel - boardingTravel);
+  operations.begin();
   previousTime = undefined;
-  lookYaw = 0;
-  lookPitch = 0;
-  setPhase('waiting');
+  rideCamera.reset();
+  setPhase(state.phase);
 }
 
-finish.addEventListener('click', () => setPhase('finished'));
+finish.addEventListener('click', () => {
+  operations.finishRide();
+  setPhase(state.phase);
+});
 restart.addEventListener('click', begin);
+skiButton.addEventListener('click', () => {
+  if (quad || state.phase !== 'arrived') return;
+  clearSkiInput();
+  ski.begin();
+  setPhase('skiing');
+  skiControls.querySelector('button').focus();
+});
+skiReturn.addEventListener('click', () => {
+  ski.state.arrived = false;
+  clearSkiInput();
+  begin();
+});
 
-canvas.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || dragPointer !== undefined) return;
-  dragPointer = event.pointerId;
-  canvas.setPointerCapture(dragPointer);
-});
-canvas.addEventListener('pointermove', event => {
-  if (event.pointerId !== dragPointer) return;
-  lookYaw -= event.movementX * 0.004;
-  lookPitch = THREE.MathUtils.clamp(lookPitch - event.movementY * 0.004, -1.26, 1.26);
-});
-canvas.addEventListener('lostpointercapture', event => {
-  if (event.pointerId === dragPointer) dragPointer = undefined;
-});
+const trailMap = document.querySelector('#trail-map');
+trailMap.addEventListener('close', clearSkiInput);
+let resizeNeeded = false;
+
+function onResize() {
+  resizeNeeded = true;
+}
 
 function resize() {
+  resizeNeeded = false;
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  camera.aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
-  camera.updateProjectionMatrix();
+  rideCamera.resize(canvas.clientWidth, canvas.clientHeight);
 }
 
-function stageAt(distance) {
-  if (distance < boardingStart) return 'waiting';
-  if (distance < boarding) return 'boarding';
-  if (distance < unloading) return 'riding';
-  if (quad ? travel - boardingTravel < quadUnloadTime + glideSeconds : distance < exitEnd) return 'unloading';
-  return 'arrived';
-}
+const terminalLabels = {
+  station: '駅内搬送', accelerate: 'タイヤで加速', decelerate: 'タイヤで減速',
+  align: '索と同速・あごに導入', detach: '索から分離',
+  close: '握索機を閉じる', open: '握索機を開く',
+  releaseRail: '固定完了・レールを離れる', takeRail: 'レールに乗る', line: '本線',
+};
 
-function updateCamera() {
-  seatedEye.copy(chairs[boardingChair].position);
-  seatedEye.y += 1.02 - chairDrop;
-  seatedEye.z -= 0.22;
-  seatedEye.x += seatXs[quad ? 1 : 0];
-  let heading = 0;
-  let incline = 0;
-
-  if (phase === 'waiting' || phase === 'boarding') {
-    const progress = THREE.MathUtils.smoothstep(along, boardingStart, boarding);
-    pose.copy(waitingEye).lerp(seatedEye, progress);
-    heading = THREE.MathUtils.lerp(waitingYaw, 0, progress);
-    incline = -0.14 * (1 - progress) - 0.12 * Math.sin(progress * Math.PI);
-  } else if (phase === 'riding') {
-    pose.copy(seatedEye);
-  } else if (quad) {
-    const elapsed = travel - boardingTravel - quadUnloadTime;
-    const glide = THREE.MathUtils.smoothstep(elapsed, 0, glideSeconds);
-    const landing = THREE.MathUtils.smoothstep(elapsed, 0, 1.65);
-    const point = quadExitPose(glide * quadGlideLength);
-    pose.set(point.x + seatXs[1] * (1 - landing),
-      point.y + THREE.MathUtils.lerp(cableHeight - railDrop + 1.02 - chairDrop, 1.68, landing),
-      -point.along);
-    heading = point.yaw * landing;
-    incline = -0.11 * landing;
-  } else {
-    const progress = THREE.MathUtils.smoothstep(along, unloading, exitEnd);
-    const exitOffset = Math.min(along - unloading, exitEnd - unloading);
-    pose.set(
-      upper.x + seatXs[0] * (1 - progress) + 2.25 * progress,
-      summit + THREE.MathUtils.lerp(cableHeight - railDrop + 1.02 - chairDrop, 1.68, progress)
-        + 0.045 * Math.sin(progress * 4 * Math.PI) * Math.sin(progress * Math.PI),
-      -unloading - 0.22 - exitOffset,
-    );
-    heading = overlookYaw * progress;
-    incline = -0.10 * progress;
-  }
-
-  camera.position.copy(pose);
-  camera.rotation.set(lookPitch + incline, lookYaw + heading, 0);
-}
-
-function terminalStatus(distance) {
-  const along = start + distance;
-  const weight = terminalWeight(distance);
-  if (weight >= 0.999) return ' · 駅内搬送';
-  if (weight > 0.001) return along < (boarding + unloading) / 2 ? ' · タイヤで加速' : ' · タイヤで減速';
-  const transfer = handoffDistance(distance);
-  const departure = along < (boarding + unloading) / 2;
-  if (transfer < handoff.aligned) return departure ? ' · 索と同速・あごに導入' : ' · 索から分離';
-  if (transfer < handoff.clamped) return departure ? ' · 握索機を閉じる' : ' · 握索機を開く';
-  if (transfer < handoff.railEnd) return departure ? ' · 固定完了・レールを離れる' : ' · レールに乗る';
-  return ' · 本線';
-}
+let previousAlong;
+let previousGreen;
+const carrierMotion = { pitch: 0, bounce: 0 };
+const listenerForward = new THREE.Vector3();
+const listenerUp = new THREE.Vector3();
 
 function frame(time) {
   const dt = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.1);
   previousTime = time;
 
-  const elapsed = dt * Number(speedControl.value);
-  travel += elapsed;
-  ropeTravel += elapsed * mainSpeed;
-  const riderDistance = motion.distanceAt(travel - boardingTravel);
-  along = start + riderDistance;
-  if (phase !== 'finished') {
-    const next = stageAt(along);
-    if (phase !== next) setPhase(next);
-  }
-
-  for (const [i, chair] of chairs.entries()) {
-    const distance = motion.distanceAt(travel + i * seatSpacing);
-    chairDistances[i] = distance;
-    chair.rotation.y = liftPose(distance, chair.position);
-    if (quad) {
-      chair.position.y -= railDrop * railSupport(distance);
-      poseDetachableGrip(chair, gripOpen(distance));
-      const d = THREE.MathUtils.euclideanModulo(distance, loopLength);
-      const leaving = THREE.MathUtils.smoothstep(d, boarding - start + 1, boarding - start + 4);
-      const arriving = THREE.MathUtils.smoothstep(d, unloading - start - 7, unloading - start - 2);
-      const outbound = d < lineLength ? leaving * (1 - arriving) : 0;
-      chair.getObjectByName('quad-safety-bar').rotation.x = 1.26 * (1 - outbound);
+  operations.advance(dt * Number(speedControl.value));
+  const { travel, ropeTravel, riderDistance, reservedChair, phase, glideElapsed, along } = state;
+  if (phase === 'riding' && !staffView.value && !trailMap.open && !document.hidden
+    && !ski.state.running && !ski.state.arrived
+    && operations.towerBetween(previousAlong, along) !== undefined) audio.towerPass(operations.speedAt(riderDistance));
+  if (quad && phase === 'riding' && !staffView.value && !trailMap.open && !document.hidden) {
+    for (const [name, point] of Object.entries(operations.config.announcementPoints)) {
+      if (previousAlong < point && along >= point) audio.announce(name);
     }
   }
-  population.updateSkiers(travel);
-  updateBoardingSignal(population.updateBoarding(chairDistances, phase === 'waiting' || phase === 'boarding' || phase === 'riding' ? boardingChair : -1));
-  for (const wheel of wheels) wheel.rotation.y = ropeTravel / wheelRadius;
-  for (const { rotor, rate } of driveTires) rotor.rotation.x = travel * rate;
-  const speedText = phase === 'arrived' || phase === 'finished' ? ''
-    : quad && phase === 'unloading' && travel - boardingTravel - quadUnloadTime > 1.65 ? '緩斜面を滑走中'
-      : speedAt(riderDistance).toFixed(2) + ' m/s（1倍時）' + (quad ? terminalStatus(riderDistance) : '');
+  previousAlong = along;
+  if (ski.state.running && !trailMap.open) ski.advance(dt, skiingInput());
+  const playerPhase = ski.state.running ? 'skiing' : ski.state.arrived ? 'skiArrived' : phase;
+  if (shownPhase !== playerPhase) setPhase(playerPhase);
+
+  const riderChair = ['waiting', 'boarding', 'riding'].includes(phase) ? reservedChair : -1;
+  const playerRow = phase === 'waiting' || phase === 'boarding' ? state.queueRow : -1;
+  population.advanceBoarding(chairDistances, riderChair, travel);
+
+  const terminal = quad ? operations.terminalModeAt(riderDistance) : null;
+  const speedText = ski.state.running ? (ski.state.speed * 3.6).toFixed(0) + ' km/h'
+    : phase === 'arrived' || phase === 'finished' ? ''
+    : quad && phase === 'unloading' && glideElapsed > 1.65 ? '緩斜面を滑走中'
+      : operations.speedAt(riderDistance).toFixed(2) + ' m/s（1倍時）' + (quad ? ' · ' + terminalLabels[terminal] : '');
   if (speedReadout.textContent !== speedText) speedReadout.textContent = speedText;
-  updateCamera();
-  if (inspectingGrip) {
-    const chair = chairs[boardingChair];
-    const yaw = chair.rotation.y;
-    const offset = inspectionOffset.set(-0.96, 1.01, -0.80).applyAxisAngle(up, yaw + lookYaw * 0.55);
-    camera.position.copy(chair.position).add(offset);
-    camera.position.y += lookPitch * 0.6;
-    camera.lookAt(inspectionTarget.copy(chair.position).addScaledVector(up, 0.025));
+  const stationZone = phase === 'waiting' || phase === 'boarding' || phase === 'unloading'
+    || (phase === 'riding' && (state.along < boarding + 24 || state.along > unloading - 24));
+  const staffArea = staffView.value;
+  const quiet = trailMap.open || document.hidden;
+  const queue = operations.boardingQueueAt(travel);
+  const nearBoarding = staffArea === 'boarding' || (!staffArea && !ski.state.running && !ski.state.arrived
+    && (phase === 'waiting' || phase === 'boarding' || (phase === 'riding' && Math.abs(along - boarding) < 20)));
+  if (previousGreen === false && queue.green && nearBoarding && !quiet) audio.boardingChime();
+  previousGreen = queue.green;
+  const { start: baseWheel, end: summitWheel } = operations.config;
+  const wheelDistance = Math.min(Math.abs(along - baseWheel), Math.abs(along - summitWheel));
+  const motorLevel = staffArea ? .74 : !ski.state.running && !ski.state.arrived && phase !== 'finished'
+    ? 1 - THREE.MathUtils.smoothstep(wheelDistance, 4, 24) : 0;
+  audio.update({
+    zone: staffArea ? 'station' : ski.state.running ? 'ski' : ski.state.arrived ? 'silent' : stationZone ? 'station' : phase === 'riding' ? 'line' : 'silent',
+    speed: ski.state.running ? ski.state.speed : operations.speedAt(riderDistance),
+    motorLevel,
+    jointPhase: !staffArea && phase === 'riding' && (terminal === 'accelerate' || terminal === 'decelerate') ? terminal : null,
+    quad, quiet,
+  });
+  if (!trailMap.open) {
+    for (const [i, chair] of chairs.entries()) {
+      const distance = chairDistances[i];
+      chair.rotation.y = liftPose(distance, chair.position);
+      if (quad) {
+        const mechanics = mechanicsAt(distance);
+        chair.position.y -= mechanics.carrierDrop;
+        poseDetachableGrip(parts[i], mechanics.gripOpening);
+        parts[i].bar.rotation.x = mechanics.barAngle;
+      }
+      operations.carrierMotionAt(distance, carrierMotion);
+      carriers[i].rotation.x = carrierMotion.pitch;
+      carriers[i].position.y = carrierMotion.bounce;
+    }
+    population.updateSkiers(travel);
+    population.updateBoarding(chairDistances, riderChair, playerRow, queue, travel);
+    station.updateBoardingSignal(queue.green);
+    const skier = ski.state;
+    const pose = skier.running || skier.arrived
+      ? { position: skiEye.set(skier.x, terrainHeight(skier.x, skier.along) + 1.58, -skier.along), heading: skier.yaw, incline: -.135, lean: skier.lean }
+      : rideCamera.riderPose(state, carriers[reservedChair], queueSpacing);
+    rideCamera.update(pose, chairs[reservedChair]);
+    updateThirdPerson(state, carriers[reservedChair], skier, pose);
+    if (staffView.value) rideCamera.updateStaff(staffView.value);
+    camera.getWorldDirection(listenerForward);
+    listenerUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    audio.setListener(camera.position, listenerForward, listenerUp);
+    if (resizeNeeded) resize();
+    station.renderAt(travel, ropeTravel);
+    renderer.render(scene, camera);
   }
-  renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', resize);
+window.addEventListener('resize', onResize);
 resize();
 begin();
 requestAnimationFrame(frame);
