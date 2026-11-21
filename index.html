@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#132e35">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <title>雪明かり高原｜ゲレンデリフト</title>
+</head>
+<body>
+  <main>
+    <canvas id="view" aria-label="ペアリフトから見えるゲレンデ"></canvas>
+    <header>
+      <h1>ゲレンデリフト</h1>
+      <p id="status" role="status">読み込み中</p>
+      <p id="line-speed"></p>
+    </header>
+    <div class="controls">
+      <label>リフト
+        <select id="lift-choice">
+          <option value="pair">ペア</option>
+          <option value="quad">クワッド</option>
+        </select>
+      </label>
+      <label>時間倍率
+        <select id="speed" disabled>
+          <option value="1">1倍</option>
+          <option value="2">2倍</option>
+          <option value="4">4倍</option>
+        </select>
+      </label>
+      <button id="grip-view" type="button" aria-pressed="false" hidden>握索機を見る</button>
+      <button id="finish" hidden>体験を終える</button>
+      <button id="restart" hidden>もう一度乗る</button>
+      <p>ドラッグで見回す</p>
+    </div>
+    <button class="map-toggle" id="show-map" type="button">ゲレンデ案内</button>
+    <dialog id="trail-map" aria-labelledby="map-title">
+      <div class="map-heading">
+        <h2 id="map-title">雪明かり高原のコース案内</h2>
+        <form method="dialog"><button type="submit">閉じる</button></form>
+      </div>
+      <div class="map-body">
+        <canvas id="map-view" width="470" height="570" role="img" aria-label="雪明かり高原の4コース、リフト、ロッジの配置図"></canvas>
+        <div>
+          <p class="map-legend">画面左下の「リフト」でペアとクワッドを切り替えられます。</p>
+          <ul class="trail-list"></ul>
+        </div>
+      </div>
+    </dialog>
+  </main>
+  <script type="module">
+    import('./resort-map.js').catch(console.error);
+    import('./lift.js').catch(error => {
+      document.querySelector('#status').textContent = '起動できませんでした。依存関係とWebGL 2の設定を確認してください。';
+      console.error(error);
+    });
+  </script>
+</body>
+</html>
