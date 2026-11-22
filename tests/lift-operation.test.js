@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceCarrierSwing, createLiftDrive, createLiftOperations, queueSpacing, queueRows } from './lift-operation.js';
+import { advanceCarrierSwing, createLiftDrive, createLiftOperations, queueSpacing, queueRows } from '../js/lift-operation.js';
 
 test('quad matches rope speed, aligns, clamps and only then clears the rail', () => {
   const operation = createLiftOperations(true);

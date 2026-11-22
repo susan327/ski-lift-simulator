@@ -1,6 +1,6 @@
 import { liftExitPose, liftExitProgress, liftExitClearsCarrier, exitRunLength } from './resort.js';
 import { queueRows, queueSpacing } from './lift-operation.js';
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from '../node_modules/three/build/three.module.js';
 
 const fabric = color => new THREE.MeshStandardMaterial({ color, roughness: 0.82 });
 const pants = fabric(0x28313d);

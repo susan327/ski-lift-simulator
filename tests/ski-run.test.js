@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { courses, places, terrainHeight, liftExitPose, liftExitProgress, liftExitClearsCarrier, exitRunLength } from './resort.js';
-import { createSkiRun } from './ski-run.js';
-import { createLiftOperations } from './lift-operation.js';
+import { courses, places, terrainHeight, liftExitPose, liftExitProgress, liftExitClearsCarrier, exitRunLength } from '../js/resort.js';
+import { createSkiRun } from '../js/ski-run.js';
+import { createLiftOperations } from '../js/lift-operation.js';
 
 test('the two pair lifts serve the lower slope and the upper slope independently', () => {
   const first = createLiftOperations(false);

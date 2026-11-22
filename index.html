@@ -131,9 +131,9 @@
     }
     if (transition) loadingScreen.showModal();
     else titleScreen.showModal();
-    import('./install-guide.js').catch(console.error);
-    import('./resort-map.js').catch(console.error);
-    import('./lift.js').then(({ startExperience }) => {
+    import('./js/install-guide.js').catch(console.error);
+    import('./js/resort-map.js').catch(console.error);
+    import('./js/lift.js').then(({ startExperience }) => {
       if (transition) startExperience(transition.mode, transition.sound);
     }).catch(error => {
       if (transition) {

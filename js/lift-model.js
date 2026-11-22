@@ -1,5 +1,5 @@
 import { mergeFixedMeshes } from './render-optimization.js';
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from '../node_modules/three/build/three.module.js';
 
 const zinc = new THREE.MeshStandardMaterial({ color: 0x8399a2, roughness: 0.32, metalness: 0.48 });
 const rubber = new THREE.MeshStandardMaterial({ color: 0x232b31, roughness: 0.86 });

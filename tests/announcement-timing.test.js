@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createLiftOperations } from './lift-operation.js';
-import { createRideSoundEvents } from './ride-sound-events.js';
+import { createLiftOperations } from '../js/lift-operation.js';
+import { createRideSoundEvents } from '../js/ride-sound-events.js';
 
 test('quad summit announcements stay separate at 4x and after switching from 1x during the preview', () => {
-  const wav = readFileSync(new URL('./announcements/02-approaching.wav', import.meta.url));
+  const wav = readFileSync(new URL('../announcements/02-approaching.wav', import.meta.url));
   const fmt = wav.indexOf('fmt ');
   const data = wav.indexOf('data');
   assert.ok(fmt >= 0 && data >= 0);

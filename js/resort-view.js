@@ -1,5 +1,5 @@
 import { addVillageScenery } from './village-scenery.js';
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from '../node_modules/three/build/three.module.js';
 import { courses, places, terrainHeight, nearCourse, nearLift, quadLine, slopeAlong, slopeWidthScale, stretchAlong } from './resort.js';
 import { createBatches, addTerrainTiles } from './render-optimization.js';
 

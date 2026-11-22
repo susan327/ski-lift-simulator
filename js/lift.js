@@ -1,6 +1,6 @@
 import { createMovingInstances } from './render-optimization.js';
 import { createRideSoundEvents } from './ride-sound-events.js';
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from '../node_modules/three/build/three.module.js';
 import { courses, terrainHeight, liftExitClearsCarrier } from './resort.js';
 import { addResortTerrain, addResortScenery } from './resort-view.js';
 import { advanceCarrierSwing, createLiftDrive, createLiftOperations, queueSpacing } from './lift-operation.js';

@@ -1,4 +1,4 @@
-import * as THREE from './node_modules/three/build/three.module.js';
+import * as THREE from '../node_modules/three/build/three.module.js';
 import { terrainHeight, terminalNetFront, exitRunLength, liftExitPose } from './resort.js';
 import { createBatches, mergeFixedMeshes } from './render-optimization.js';
 import { addSheaveTrain, addBullwheelDetails, gripCamContact } from './lift-model.js';
