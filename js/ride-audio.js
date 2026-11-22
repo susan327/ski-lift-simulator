@@ -50,7 +50,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     return {context,buffer,master,wind,rollers,snow,motor,motorGain,motorHum,humGain};
   }
 
-  async function setEnabled(next) {
+  function setEnabled(next) {
     if(!AudioEngine)return;
     enabled=next;
     button.setAttribute('aria-pressed',String(enabled));
@@ -58,6 +58,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     if (!enabled && !engine) return;
     try{
       engine??=setup();
+      if (enabled && engine.context.state !== 'running') void engine.context.resume().catch(() => {});
       if (!enabled) stopStationAnnouncement();
       if (enabled && announcementFiles) {
         for (const [name, url] of Object.entries(announcementFiles)) {
@@ -71,13 +72,13 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       button.textContent='環境音を再生できません';
       return;
     }
-    if (enabled && engine.context.state !== 'running') await engine.context.resume().catch(() => {});
   }
   button.addEventListener('click', () => setEnabled(!enabled));
   function resumeOnInteraction(event) {
     if (!enabled || !engine || button.contains(event.target) || engine.context.state === 'running') return;
     void engine.context.resume().catch(() => {});
   }
+  window.addEventListener('touchend', resumeOnInteraction, { passive: true });
   window.addEventListener('click', resumeOnInteraction);
   window.addEventListener('keydown', resumeOnInteraction);
 

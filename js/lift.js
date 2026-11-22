@@ -489,6 +489,8 @@ function frame(time) {
 
 let arrivingFromTransition = false;
 export function startExperience(mode, sound = true) {
+  if (started) return;
+  void audio.setEnabled(sound !== false);
   arrivingFromTransition = loadingScreen.open;
   const staff = mode === 'staff';
   staffView.value = staff ? 'boarding' : '';
@@ -497,11 +499,14 @@ export function startExperience(mode, sound = true) {
   liftStart.hidden = !staff;
   staffView.dispatchEvent(new Event('change'));
   begin();
-  void audio.setEnabled(sound !== false);
   started = true;
   titleScreen.close();
 }
 
+startButton.addEventListener('click', event => {
+  event.preventDefault();
+  startExperience(new FormData(startForm).get('mode'), true);
+});
 startForm.addEventListener('submit', event => {
   event.preventDefault();
   startExperience(new FormData(startForm).get('mode'), true);

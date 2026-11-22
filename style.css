@@ -156,7 +156,11 @@ h2 { font-size: 1.2rem; margin: 0; }
 #title-heading { margin-bottom: .3rem; font-size: clamp(1.55rem, 4.2vw, 2.8rem); }
 #title-heading span { display: block; }
 .title-resort { margin: 0 0 1rem; color: #d0e7ea; }
-#install-app { margin: .7rem auto 0; display: block; background: transparent; border: 0; text-decoration: underline; }
+.title-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .25rem .5rem; margin-top: .45rem; }
+.title-actions button { background: transparent; border: 0; text-decoration: underline; }
+#help-guide { max-width: 520px; }
+#help-guide h3 { margin: 1rem 0 .3rem; font-size: 1rem; }
+#help-guide p { margin: 0; line-height: 1.55; }
 #install-guide { max-width: 440px; }
 #install-guide h3 { margin: 1rem 0 .4rem; font-size: 1rem; }
 #install-guide p { line-height: 1.55; }
