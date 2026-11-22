@@ -485,7 +485,7 @@ function frame(time) {
 }
 
 let arrivingFromTransition = false;
-export function startExperience(mode, sound) {
+export function startExperience(mode, sound = true) {
   arrivingFromTransition = loadingScreen.open;
   const staff = mode === 'staff';
   staffView.value = staff ? 'boarding' : '';
@@ -494,7 +494,7 @@ export function startExperience(mode, sound) {
   liftStart.hidden = !staff;
   staffView.dispatchEvent(new Event('change'));
   begin();
-  if (sound) void audio.setEnabled(true);
+  void audio.setEnabled(sound !== false);
   started = true;
   titleScreen.close();
 }

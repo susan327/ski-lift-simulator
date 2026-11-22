@@ -1,5 +1,5 @@
 export function createRideAudio(button, chime, jointClip, announcementFiles, speakers = {}) {
-  let engine, enabled=false, lastUpdate=-Infinity;
+  let engine, enabled=true, lastUpdate=-Infinity;
   let previousJointPhase = null;
   const announcements = new Map();
   const loadingAnnouncements = new Set();
@@ -52,10 +52,12 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
 
   async function setEnabled(next) {
     if(!AudioEngine)return;
+    enabled=next;
+    button.setAttribute('aria-pressed',String(enabled));
+    button.textContent=enabled?'環境音を切る':'環境音を聴く';
+    if (!enabled && !engine) return;
     try{
       engine??=setup();
-      await engine.context.resume();
-      enabled=next;
       if (!enabled) stopStationAnnouncement();
       if (enabled && announcementFiles) {
         for (const [name, url] of Object.entries(announcementFiles)) {
@@ -63,15 +65,21 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
         }
       }
 
-      button.setAttribute('aria-pressed',String(enabled));
-      button.textContent=enabled?'環境音を切る':'環境音を聴く';
       engine.master.gain.setTargetAtTime(enabled?.65:0,engine.context.currentTime,.07);
     } catch {
       button.disabled=true;
       button.textContent='環境音を再生できません';
+      return;
     }
+    if (enabled && engine.context.state !== 'running') await engine.context.resume().catch(() => {});
   }
   button.addEventListener('click', () => setEnabled(!enabled));
+  function resumeOnInteraction(event) {
+    if (!enabled || !engine || button.contains(event.target) || engine.context.state === 'running') return;
+    void engine.context.resume().catch(() => {});
+  }
+  window.addEventListener('click', resumeOnInteraction);
+  window.addEventListener('keydown', resumeOnInteraction);
 
   async function loadAnnouncement(name, url) {
     loadingAnnouncements.add(name);
