@@ -119,7 +119,7 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   const queueFloor = (x, along) => Math.max(platformY, terrainHeight(x, along));
   for (const side of [-1, 1]) {
     const x = queueX + side * queueHalfWidth;
-    guideNet((side < 0 ? [-.4, -2.0, -3.6] : [2, .3, -1.7, -3.6])
+    guideNet((side < 0 ? [-.4, -2.0, -4.2] : [2, .3, -1.7, -4.2])
       .map(offset => [x, waitingAlong + offset]), queueFloor, true);
   }
 
@@ -374,25 +374,38 @@ export function createStationView(scene, operations, { mesh, box, material, stee
     const y = trackGround(along);
     const z = -along;
     const x = lineX(along) - wheelRadius;
-    const ground = terrainHeight(x, along);
-    const height = y - ground + cableHeight + 0.48;
-    box(0.62, height, 0.62, steel, x, ground + height / 2, z);
-    box(1.4, 0.42, 1.28, steel, x, y + cableHeight + 0.40, z);
+    const overheadSupport = quad && index === 0;
+    const axleY = y + cableHeight;
+    if (overheadSupport) {
+      // Suspend the return wheel from the portal so all landing lanes stay clear.
+      box(.38, .77, .38, steel, x, axleY + .48, z);
+    } else {
+      const ground = terrainHeight(x, along);
+      const height = axleY - ground + .48;
+      box(.62, height, .62, steel, x, ground + height / 2, z);
+      box(1.4, .42, 1.28, steel, x, axleY + .40, z);
+    }
     if (quad) {
       const stationRoof = material(0x225460);
-      const roofZ = z + (index === 0 ? 5.5 : -5.5);
-      const postOffsets = index === 1 ? [-4.25, 5.25] : [-4.25, 4.25];
-      const roofCenter = x + (postOffsets[0] + postOffsets[1]) / 2;
-      box(postOffsets[1] - postOffsets[0] + .70, .24, 17, stationRoof, roofCenter, y + cableHeight + 1.15, roofZ);
-      for (const offset of postOffsets) {
+      const roofZ = z + (overheadSupport ? 5.5 : -5.5);
+      const postXs = overheadSupport ? [upper.x - 9.5, upper.x + 11] : [x - 4.25, x + 5.25];
+      const span = postXs[1] - postXs[0];
+      const roofCenter = (postXs[0] + postXs[1]) / 2;
+      box(span + .70, .24, 17, stationRoof, roofCenter, axleY + 1.15, roofZ);
+      for (const postX of postXs) {
         for (const shift of [-6, 6]) {
-          const floor = terrainHeight(x + offset, -roofZ - shift);
-          const pole = y + cableHeight + 1.15 - floor;
-          box(0.28, pole, 0.30, steel, x + offset, floor + pole / 2, roofZ + shift);
+          const postZ = roofZ + shift;
+          const floor = terrainHeight(postX, -postZ);
+          const height = axleY + 1.15 - floor;
+          const post = box(.28, height, .30, steel, postX, floor + height / 2, postZ);
+          if (overheadSupport) post.name = 'quad-exit-portal-post';
         }
+        const beamX = overheadSupport ? postX : x + (postX < x ? -3.35 : 3.35);
+        box(.19, .34, 16.8, steel, beamX, axleY + .83, roofZ);
       }
-      for (const offset of [-3.35, 3.35]) {
-        box(0.16, 0.32, 16.8, steel, x + offset, y + cableHeight + 0.78, roofZ);
+      if (overheadSupport) {
+        box(span + .30, .31, .50, steel, roofCenter, axleY + .91, z);
+        box(span + .30, .25, .35, steel, roofCenter, axleY + .91, roofZ + 6);
       }
     }
     const wheel = new THREE.Group();
@@ -458,9 +471,13 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   cableBatches.build();
   mergeFixedMeshes(scene, scene.children.filter(child => !existing.has(child)), 16);
 
-  function renderAt(travel, ropeTravel) {
-    for (const wheel of wheels) wheel.rotation.y = ropeTravel / wheelRadius;
-    cableBatches.update(travel);
+  let lastRopeTravel;
+  function renderAt(travel, ropeTravel, camera) {
+    if (ropeTravel !== lastRopeTravel) {
+      for (const wheel of wheels) wheel.rotation.y = ropeTravel / wheelRadius;
+      lastRopeTravel = ropeTravel;
+    }
+    cableBatches.update(travel, camera);
   }
 
   return { speakers, seatXs, waitingDepth, waitingOffset, platformY, updateBoardingSignal, renderAt };

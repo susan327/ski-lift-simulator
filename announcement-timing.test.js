@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createLiftOperations } from './lift-operation.js';
+import { createRideSoundEvents } from './ride-sound-events.js';
 
 test('quad summit announcements stay separate at 4x and after switching from 1x during the preview', () => {
   const wav = readFileSync(new URL('./announcements/02-approaching.wav', import.meta.url));
@@ -25,4 +26,27 @@ test('quad summit announcements stay separate at 4x and after switching from 1x 
     }
     assert.ok(unloadAt - previewAt >= duration);
   }
+});
+
+test('quad selects only one repeating station voice and silences it when the map opens', () => {
+  const lift = createLiftOperations(true);
+  const calls = [];
+  const sound = createRideSoundEvents(lift, {
+    setStationAnnouncement: name => calls.push(name),
+    towerPass() {},
+    boardingChime() {},
+  });
+  const { approaching, unloading } = lift.config.announcementPoints;
+  const update = (along, state = {}) => sound.update({
+    phase: 'riding', along, queue: { green: false }, staffArea: '', quiet: false, skiing: false, ...state,
+  });
+  update(approaching - 70);
+  update(approaching - 30);
+  update(approaching);
+  update(unloading - 35);
+  update(unloading, { phase: 'unloading' });
+  update(unloading, { phase: 'arrived' });
+  update(unloading, { phase: 'arrived', quiet: true });
+  update(0, { phase: 'waiting', staffArea: 'unloading' });
+  assert.deepEqual(calls, [null, 'approaching', 'approaching', 'unloading', 'unloading', 'unloading', null, 'unloading']);
 });

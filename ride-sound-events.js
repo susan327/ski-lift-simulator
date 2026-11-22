@@ -1,10 +1,10 @@
 export function createRideSoundEvents(operations, audio) {
   const { announcementPoints, boarding } = operations.config;
-  const announcements = Object.entries(announcementPoints ?? {});
   let previousAlong, previousGreen;
 
   function reset(along) {
     previousAlong = along;
+    audio.setStationAnnouncement(null);
   }
 
   function update({ phase, along, riderDistance, queue, staffArea, quiet, skiing }) {
@@ -12,10 +12,20 @@ export function createRideSoundEvents(operations, audio) {
       if (operations.towerBetween(previousAlong, along) !== undefined) {
         audio.towerPass(operations.speedAt(riderDistance));
       }
-      for (const [name, point] of announcements) {
-        if (previousAlong < point && along >= point) audio.announce(name);
+    }
+    let announcement = null;
+    if (announcementPoints && !quiet && !skiing) {
+      if (staffArea === 'unloading' || (!staffArea && (
+        phase === 'unloading' || phase === 'arrived' ||
+        (phase === 'riding' && along >= announcementPoints.unloading - 46)
+      ))) {
+        announcement = 'unloading';
+      } else if (!staffArea && phase === 'riding'
+        && along >= announcementPoints.approaching - 65 && along <= announcementPoints.approaching + 26) {
+        announcement = 'approaching';
       }
     }
+    audio.setStationAnnouncement(announcement);
     previousAlong = along;
 
     const nearBoarding = staffArea === 'boarding' || (!staffArea && !skiing

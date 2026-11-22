@@ -7,6 +7,8 @@ export function createBatches(parent, cellSize = 48) {
   const matrix = new THREE.Matrix4();
   const rotation = new THREE.Matrix4();
   const identity = new THREE.Matrix4();
+  const rollingFrustum = new THREE.Frustum();
+  const rollingProjection = new THREE.Matrix4();
 
   function add(geometry, material, base, local = identity, rate = 0) {
     const x = base.elements[12];
@@ -36,8 +38,17 @@ export function createBatches(parent, cellSize = 48) {
     batches.clear();
   }
 
-  function update(time) {
-    for (const {mesh,instances} of rolling) {
+  function update(time, camera) {
+    if (!rolling.length) return;
+    parent.updateWorldMatrix(true, false);
+    rollingProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    rollingFrustum.setFromProjectionMatrix(rollingProjection, camera.coordinateSystem);
+    for (const batch of rolling) {
+      const {mesh, instances} = batch;
+      if (batch.time === time) continue;
+      mesh.updateWorldMatrix(false, false);
+      if (!rollingFrustum.intersectsObject(mesh)) continue;
+      batch.time = time;
       instances.forEach(({base,local,rate},i)=>{
         rotation.makeRotationX(time*rate);
         mesh.setMatrixAt(i,matrix.multiplyMatrices(base,rotation).multiply(local));

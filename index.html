@@ -39,6 +39,8 @@
           <option value="unloading">山頂駅の降車口</option>
         </select>
       </label>
+      <button id="lift-stop" type="button" hidden>ストップ</button>
+      <button id="lift-start" type="button" hidden disabled>スタート</button>
       <button id="view-mode" type="button" aria-pressed="false">三人称視点</button>
       <button id="grip-view" type="button" aria-pressed="false" hidden>握索機を見る</button>
       <button id="back-to-title" type="button">タイトルへ</button>
@@ -63,6 +65,10 @@
     </div>
     <p id="rotation-tip" role="status" hidden>横向きにするとコースを見渡しやすいよ</p>
     <button class="map-toggle" id="show-map" type="button">ゲレンデ案内</button>
+    <dialog id="loading-screen" aria-labelledby="loading-message">
+      <p id="loading-message" role="status">読み込み中</p>
+      <button id="loading-back" type="button" hidden>タイトルへ</button>
+    </dialog>
     <dialog id="title-screen" aria-labelledby="title-heading">
       <div class="title-art" role="img" aria-label="雪面から見上げるクワッド。手前の椅子の大人と、次の椅子の子どもが手を振っている"></div>
       <div class="title-menu">
@@ -110,10 +116,32 @@
   <script type="module">
     const titleScreen = document.querySelector('#title-screen');
     titleScreen.addEventListener('cancel', event => event.preventDefault());
-    titleScreen.showModal();
+    const loadingScreen = document.querySelector('#loading-screen');
+    loadingScreen.addEventListener('cancel', event => event.preventDefault());
+    let transition;
+    try {
+      const stored = sessionStorage.getItem('lift-transition');
+      if (stored) {
+        sessionStorage.removeItem('lift-transition');
+        const pending = JSON.parse(stored);
+        if (pending.destination === location.href) transition = pending;
+      }
+    } catch (error) {
+      console.warn('リフトの切り替え情報を読み込めませんでした', error);
+    }
+    if (transition) loadingScreen.showModal();
+    else titleScreen.showModal();
     import('./install-guide.js').catch(console.error);
     import('./resort-map.js').catch(console.error);
-    import('./lift.js').catch(error => {
+    import('./lift.js').then(({ startExperience }) => {
+      if (transition) startExperience(transition.mode, transition.sound);
+    }).catch(error => {
+      if (transition) {
+        document.querySelector('#loading-message').textContent = 'リフトを読み込めませんでした';
+        const back = document.querySelector('#loading-back');
+        back.hidden = false;
+        back.addEventListener('click', () => location.reload());
+      }
       document.querySelector('#status').textContent = '起動できませんでした。依存関係とWebGL 2の設定を確認してください。';
       document.querySelector('#start-button').textContent = '起動できませんでした';
       console.error(error);

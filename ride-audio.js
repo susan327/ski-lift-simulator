@@ -56,6 +56,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       engine??=setup();
       await engine.context.resume();
       enabled=next;
+      if (!enabled) stopStationAnnouncement();
       if (enabled && announcementFiles) {
         for (const [name, url] of Object.entries(announcementFiles)) {
           if (!announcements.has(name) && !loadingAnnouncements.has(name)) loadAnnouncement(name, url);
@@ -85,7 +86,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     }
   }
 
-  function update({zone,speed,quad,quiet,motorLevel,jointPhase}) {
+  function update({zone,speed,quad,quiet,motorLevel,jointPhase,motorSpeedRatio=1}) {
     if(!engine||!enabled)return;
     const t=engine.context.currentTime;
     const activeJointPhase = quiet ? null : jointPhase;
@@ -99,12 +100,12 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     const skiing=zone==='ski'&&!quiet;
     engine.wind.gain.gain.setTargetAtTime(flying?.09+speed*.018:skiing?speed*.012:0,t,.22);
     engine.wind.filter.frequency.setTargetAtTime(440+speed*65,t,.22);
-    engine.rollers.gain.gain.setTargetAtTime(station?(quad?(jointActive?.075:.19):.12):0,t,.19);
+    engine.rollers.gain.gain.setTargetAtTime(station?(quad?(jointActive?.075:.19):.12)*motorSpeedRatio:0,t,.19);
     engine.rollers.filter.frequency.setTargetAtTime(130+speed*38,t,.14);
-    const motorVolume = quiet ? 0 : motorLevel;
+    const motorVolume = quiet ? 0 : motorLevel * Math.sqrt(motorSpeedRatio);
     engine.motorGain.gain.setTargetAtTime(motorVolume * (jointActive ? .069 : .105),t,.16);
     engine.humGain.gain.setTargetAtTime(motorVolume * .026,t,.16);
-    const motorHz = quad ? 49 : 43;
+    const motorHz = (quad ? 49 : 43) * (.38 + .62 * motorSpeedRatio);
     engine.motor.frequency.setTargetAtTime(motorHz,t,.14);
     engine.motorHum.frequency.setTargetAtTime(motorHz * 2.03,t,.14);
     engine.snow.gain.gain.setTargetAtTime(skiing?speed*.015:0,t,.16);
@@ -146,7 +147,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       const panner = engine.context.createPanner();
       panner.panningModel = 'HRTF';
       panner.distanceModel = 'inverse';
-      panner.refDistance = 5;
+      panner.refDistance = name === 'approaching' ? 14 : name === 'unloading' ? 8 : 5;
       panner.rolloffFactor = .85;
       panner.coneInnerAngle = 110;
       panner.coneOuterAngle = 250;
@@ -175,6 +176,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     listener.upX.setValueAtTime(up.x, currentTime);
     listener.upY.setValueAtTime(up.y, currentTime);
     listener.upZ.setValueAtTime(up.z, currentTime);
+    updateStationAnnouncement(position);
   }
 
   function playClip(clip, speaker) {
@@ -199,9 +201,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     if (duration !== undefined) announce('boarding', duration + .06);
   }
 
-  function announce(name, delay = 0) {
-    const buffer = announcements.get(name);
-    if (!enabled || !buffer) return;
+  function createAnnouncement(name, buffer) {
     const { context } = engine;
     const source = context.createBufferSource();
     const lowCut = context.createBiquadFilter();
@@ -219,8 +219,71 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     presence.gain.value = 3.5;
     gain.gain.value = .86;
     source.connect(lowCut).connect(highCut).connect(presence).connect(gain).connect(speakerOutput(name));
-    source.start(context.currentTime + delay);
+    return { source, gain: gain.gain };
   }
 
-  return {update,towerPass,boardingChime,announce,setListener,setEnabled,isEnabled: () => enabled};
+  function announce(name, delay = 0) {
+    const buffer = announcements.get(name);
+    if (!enabled || !buffer) return;
+    const { source } = createAnnouncement(name, buffer);
+    source.start(engine.context.currentTime + delay);
+  }
+
+  const stationLoops = new Map();
+  let selectedStationAnnouncement = null;
+  let stationVoice;
+  let nextStationStart = 0;
+
+  function stopStationAnnouncement() {
+    if (!stationVoice) return;
+    const { source, gain } = stationVoice;
+    const now = engine.context.currentTime;
+    const fadeEnd = now + .28;
+    if (gain.cancelAndHoldAtTime) gain.cancelAndHoldAtTime(now);
+    else gain.cancelScheduledValues(now);
+    gain.linearRampToValueAtTime(0, fadeEnd);
+    source.stop(fadeEnd);
+    stationVoice = undefined;
+    nextStationStart = fadeEnd;
+  }
+
+  function setStationAnnouncement(name) {
+    if (name === selectedStationAnnouncement) return;
+    stopStationAnnouncement();
+    selectedStationAnnouncement = name;
+  }
+
+  function updateStationAnnouncement(position) {
+    const name = selectedStationAnnouncement;
+    const clip = announcements.get(name);
+    const speaker = speakers[name];
+    if (!clip || !speaker) return;
+    const { context } = engine;
+    const now = context.currentTime;
+    const distance = Math.hypot(position.x - speaker.position.x, position.y - speaker.position.y,
+      position.z - speaker.position.z);
+    // Blend in toward the edge of the audible area. The panner handles the remaining
+    // distance attenuation and left/right direction as the rider nears the horn.
+    const radius = name === 'approaching' ? 76 : 62;
+    const edge = Math.max(0, Math.min(1, (radius - distance) / 23));
+    const volume = .86 * edge * edge * (3 - 2 * edge);
+    if (!stationVoice) {
+      if (now < nextStationStart || volume === 0) return;
+      if (!stationLoops.has(name)) {
+        const pause = Math.round(1.6 * clip.sampleRate);
+        const loop = context.createBuffer(clip.numberOfChannels, clip.length + pause, clip.sampleRate);
+        for (let channel = 0; channel < clip.numberOfChannels; channel++) {
+          loop.copyToChannel(clip.getChannelData(channel), channel);
+        }
+        stationLoops.set(name, loop);
+      }
+      stationVoice = createAnnouncement(name, stationLoops.get(name));
+      stationVoice.source.loop = true;
+      stationVoice.gain.value = 0;
+      stationVoice.source.start();
+    }
+    stationVoice.gain.setTargetAtTime(volume, now, .26);
+  }
+
+  return {update,towerPass,boardingChime,setStationAnnouncement,setListener,setEnabled,isEnabled: () => enabled};
 }

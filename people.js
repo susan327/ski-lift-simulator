@@ -1,3 +1,5 @@
+import { liftExitPose, liftExitProgress, liftExitClearsCarrier, exitRunLength } from './resort.js';
+import { queueRows, queueSpacing } from './lift-operation.js';
 import * as THREE from './node_modules/three/build/three.module.js';
 
 const fabric = color => new THREE.MeshStandardMaterial({ color, roughness: 0.82 });
@@ -221,7 +223,6 @@ function createRoute(course) {
   return path;
 }
 
-export const queueSpacing = 1.22;
 
 export function createPopulation(scene, courses, terrainHeight, chairs, station) {
   const routeSpecs = [[6,5.0,2.05],[6,7.4,4.30],[4,7.0,2.03],[4,5.0,1.30]];
@@ -237,7 +238,7 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
   });
 
   const { seatXs, quad, chairDrop } = station;
-  const queue = seatXs.map((_, lane) => Array.from({ length: 3 }, (_, row) => {
+  const queue = seatXs.map((_, lane) => Array.from({ length: queueRows }, (_, row) => {
     const model = skier(lane * 2 + row * 3 + (quad ? 0 : 1), (lane + row) % 2 === 1);
     model.name = 'lift-queue-skier';
     model.userData.lane = lane;
@@ -305,11 +306,121 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
   const lastLap = new Array(chairs.length);
   const laneSteps = seatXs.map(() => -Infinity);
   const seatStyles = chairs.map(() => seatXs.map(() => null));
+  const fallbackStyles = chairs.map((_, index) => seatXs.map((_, seat) => appearance(index + seat, false)));
   const reservedSeat = quad ? 1 : 0;
+  const unloadingLaps = new Array(chairs.length);
+  const departures = [];
+  const seatsAwaitingClearance = new Set();
+  const exitRoutes = (quad ? [1, 3] : station.upperPair ? [2, 3] : [0]).map(index => {
+    const {upper, summit} = station;
+    const course = courses[index];
+    const samples = quad && course.midwayRoute ? course.midwayRoute : course.route;
+    const [firstX, firstAlong] = samples[0];
+    const side = index === 3 ? -1 : 1;
+    const entryIndex = Math.max(0, samples.findIndex(([x, along]) => Math.hypot(x - firstX, along - firstAlong) > 23));
+    const point = liftExitPose(upper, summit, exitRunLength);
+    const path = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(point.x, 0, point.along),
+      new THREE.Vector3(point.x + side * 5, 0, point.along + 7),
+      new THREE.Vector3(upper.x + side * (quad ? 20 : 14), 0, upper.along + 13),
+      ...samples.slice(entryIndex, entryIndex + 141).filter((_, i) => i % 10 === 0)
+        .map(([x, along]) => new THREE.Vector3(x, 0, along)),
+    ]);
+    return { path, seconds: path.getLength() / 4.3 };
+  });
+  const exitPosition = new THREE.Vector3();
+  const exitHeading = new THREE.Vector3();
+  const departurePool = new Map();
   const queueStyles = new Map(queue.flat().map(person => [person.id, appearances.get(person)]));
 
+  function leaveChair(index, riderChair, travel) {
+    seatXs.forEach((seatX, seat) => {
+      if (index === riderChair && seat === reservedSeat) return;
+      const style = queueStyles.get(seatStyles[index][seat]) ?? fallbackStyles[index][seat];
+      let available = departurePool.get(style);
+      if (!available) {
+        available = [];
+        departurePool.set(style, available);
+      }
+      let model = available.pop();
+      if (!model) {
+        model = skier(index + seat, style.snowboard, style);
+        model.name = 'lift-exiting-skier';
+        const cloned = new Map();
+        model.traverse(part => {
+          if (!part.isMesh) return;
+          if (!cloned.has(part.material)) cloned.set(part.material, part.material.clone());
+          part.material = cloned.get(part.material);
+        });
+        model.userData.fadeMaterials = [...cloned.values()];
+        scene.add(model);
+      }
+      const route = exitRoutes[(index + seat) % exitRoutes.length];
+      const seatKey = index * seatXs.length + seat;
+      seatsAwaitingClearance.add(seatKey);
+      model.visible = false;
+      departures.push({model, available, route, seatX, chair: chairs[index], seatKey, start: travel});
+    });
+  }
+
+  function updateDepartures(travel) {
+    const { upper, summit } = station;
+    for (let i = departures.length - 1; i >= 0; i--) {
+      const {model, available, route, seatX, chair, seatKey, start} = departures[i];
+      const elapsed = travel - start;
+      const glideTime = station.glideSeconds;
+      const fraction = (elapsed - glideTime) / route.seconds;
+      if (fraction >= 1) {
+        seatsAwaitingClearance.delete(seatKey);
+        model.visible = false;
+        available.push(model);
+        departures.splice(i, 1);
+        continue;
+      }
+      model.visible = true;
+      let x, along, yaw;
+      const stand = THREE.MathUtils.smoothstep(elapsed, 0, .9);
+      if (fraction < 0) {
+        const glide = liftExitProgress(elapsed, glideTime, quad);
+        const point = liftExitPose(upper, summit, glide * exitRunLength);
+        x = point.x + seatX * (1 + 1.3 * Math.sin(glide * Math.PI));
+        along = point.along;
+        yaw = 0;
+      } else {
+        route.path.getPointAt(fraction, exitPosition);
+        route.path.getTangentAt(fraction, exitHeading);
+        x = exitPosition.x + seatX * exitHeading.z;
+        along = exitPosition.z - seatX * exitHeading.x;
+        yaw = Math.atan2(-exitHeading.x, exitHeading.z);
+      }
+      if (seatsAwaitingClearance.has(seatKey)) {
+        if (!liftExitClearsCarrier(x, along, chair.position, chair.rotation.y, quad,
+          chair.getObjectByName('chair-carrier').rotation.x, chairDrop)) {
+          model.visible = false;
+          continue;
+        }
+        seatsAwaitingClearance.delete(seatKey);
+      }
+      model.position.set(x, terrainHeight(x, along) + .04 + .10 * (1 - stand), -along);
+      model.rotation.y = yaw;
+      const body = bodies.get(model);
+      body.scale.y = .67 + .33 * stand;
+      body.rotation.x = -.28 * (1 - stand);
+      const opacity = 1 - THREE.MathUtils.smoothstep(fraction, .86, 1);
+      for (const surface of model.userData.fadeMaterials) {
+        surface.opacity = opacity;
+        const transparent = opacity < 1;
+        if (surface.transparent !== transparent) {
+          surface.transparent = transparent;
+          surface.depthWrite = !transparent;
+          surface.needsUpdate = true;
+        }
+      }
+    }
+  }
+
   function advanceBoarding(distances, riderChair, travel) {
-    const { start, boardingContact, loopLength } = station;
+    const { start, boardingContact, unloading, loopLength } = station;
     distances.forEach((distance, index) => {
       const lap = Math.floor((distance + start - boardingContact) / loopLength);
       if (lastLap[index] !== undefined && lap > lastLap[index]) {
@@ -322,27 +433,35 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
         });
       }
       lastLap[index] = lap;
+      const unloadingLap = Math.floor((distance + start - unloading) / loopLength);
+      if (unloadingLaps[index] !== undefined && unloadingLap > unloadingLaps[index]) {
+        leaveChair(index, riderChair, travel);
+      }
+      unloadingLaps[index] = unloadingLap;
     });
   }
 
   function updateBoarding(distances, riderChair, playerRow, queueState, travel, detailedChairs) {
     const { start, boardingContact, unloading, loopLength, loadingStop, climbStart, x, waitingDepth, waitingOffset } = station;
     const platformYAlong = along => along <= loadingStop + 1.1 ? station.platformY : -Infinity;
+    updateDepartures(travel);
     seated.forEach((seats, index) => {
       const along = start + THREE.MathUtils.euclideanModulo(distances[index], loopLength);
       seats.forEach((passenger, seat) => {
-        const occupied = along >= boardingContact && along <= unloading + 3 && !(index === riderChair && seat === reservedSeat);
+        const beforeExit = along >= boardingContact && along < unloading;
+        const releasing = seatsAwaitingClearance.has(index * seatXs.length + seat);
+        const occupied = (beforeExit || releasing) && !(index === riderChair && seat === reservedSeat);
         const styleId = seatStyles[index][seat];
-        const style = queueStyles.get(styleId);
+        const style = queueStyles.get(styleId) ?? fallbackStyles[index][seat];
         const distant = distantPassengers[index][seat];
         distant.visible = occupied && !detailedChairs[index];
-        if (style && distant.visible) {
+        if (distant.visible) {
           const {profile, jacket} = style;
           distant.scale.set(profile.height * profile.width, profile.height, profile.height);
           distant.children[0].material = jacket;
           distant.children[1].material = helmetColors[profile.helmet] ?? hairColors[profile.hair ?? 0];
         }
-        if (style && passenger.userData.styleId !== styleId) {
+        if (passenger.userData.styleId !== styleId) {
           passenger.userData.styleId = styleId;
           applySeatedAppearance(passenger, style);
         }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLiftOperations } from './lift-operation.js';
+import { advanceCarrierSwing, createLiftDrive, createLiftOperations, queueSpacing, queueRows } from './lift-operation.js';
 
 test('quad matches rope speed, aligns, clamps and only then clears the rail', () => {
   const operation = createLiftOperations(true);
@@ -54,7 +54,7 @@ test('the quad waits outside the return sweep and clears it before boarding', ()
   let greenAt;
   let previousGreen = false;
   lift.begin();
-  for (let step = 0; step < 12000; step++) {
+  for (let step = 0; step < 20000; step++) {
     lift.advance(.005);
     const state = lift.state;
     const queue = lift.boardingQueueAt(state.travel);
@@ -66,7 +66,7 @@ test('the quad waits outside the return sweep and clears it before boarding', ()
     }
     if (state.phase !== 'boarding') continue;
     const along = Math.min(loadingStop, waitingAlong + (loadingStop - waitingAlong) * state.approach
-      - (state.queueRow + state.approachRowOffset) * 1.13);
+      - (state.queueRow + state.approachRowOffset) * queueSpacing);
     lift.chairDistances.forEach((distance, index) => {
       // The last part of the reserved chair's approach is the intentional seat contact.
       if (index === state.reservedChair && state.along > boarding - 1.25) return;
@@ -82,4 +82,88 @@ test('the quad waits outside the return sweep and clears it before boarding', ()
     });
   }
   assert.ok(boarded && greenAt !== undefined);
+});
+
+test('new riders join behind all three rows and move forward in order on every lift', () => {
+  for (const [quad, upperPair] of [[false, false], [true, false], [false, true]]) {
+    const lift = createLiftOperations(quad, upperPair);
+    for (let ride = 0; ride < 2; ride++) {
+      lift.begin();
+      assert.equal(lift.state.queueRow, queueRows);
+      assert.equal(lift.state.approachRowOffset, 0);
+      const rows = [lift.state.queueRow];
+      const reservedChair = lift.state.reservedChair;
+      for (let i = 0; i < 20000 && lift.state.phase !== 'arrived'; i++) {
+        lift.advance(.025);
+        assert.equal(lift.state.reservedChair, reservedChair);
+        if (lift.state.queueRow !== rows.at(-1)) rows.push(lift.state.queueRow);
+        if (lift.state.phase === 'riding') assert.equal(lift.state.queueRow, 0);
+      }
+      assert.deepEqual(rows, [3, 2, 1, 0]);
+      assert.equal(lift.state.phase, 'arrived');
+      lift.finishRide();
+      lift.advance(2.75);
+    }
+  }
+});
+
+test('lift drive ramps down and up without jumping when reversing mid-ramp', () => {
+  const drive = createLiftDrive();
+  assert.equal(drive.advance(1, true), 5 / 6);
+  assert.ok(Math.abs(drive.speedRatio - 2 / 3) < 1e-12);
+  const before = drive.speedRatio;
+  assert.ok(drive.advance(.5, false) > before * .5);
+  assert.ok(Math.abs(drive.speedRatio - before - .125) < 1e-12);
+  drive.advance(3, true);
+  assert.equal(drive.speedRatio, 0);
+  assert.equal(drive.advance(1, true), 0);
+  assert.equal(drive.advance(5, false), 3);
+  assert.equal(drive.speedRatio, 1);
+});
+test('chairs sway toward travel when braking, swing back, and settle', () => {
+  for (const [quad, upperPair] of [[false, false], [false, true], [true, false]]) {
+    const { config } = createLiftOperations(quad, upperPair);
+    const drive = createLiftDrive();
+    const swing = { pitch: 0, angularSpeed: 0 };
+    const dt = 1 / 120;
+    advanceCarrierSwing(swing, config.mainSpeed, 0, config.chairDrop);
+    for (let frame = 0; frame < 360; frame++) {
+      drive.advance(dt, true);
+      advanceCarrierSwing(swing, config.mainSpeed * drive.speedRatio, dt, config.chairDrop);
+    }
+    assert.ok(swing.pitch > .02);
+    let swungBack = false;
+    for (let frame = 0; frame < 1200; frame++) {
+      advanceCarrierSwing(swing, 0, dt, config.chairDrop);
+      swungBack ||= swing.pitch < -.005;
+    }
+    assert.ok(swungBack);
+    assert.ok(Math.abs(swing.pitch) < .002);
+    for (let frame = 0; frame < 120; frame++) {
+      drive.advance(dt, false);
+      advanceCarrierSwing(swing, config.mainSpeed * drive.speedRatio, dt, config.chairDrop);
+    }
+    assert.ok(swing.pitch < -.02);
+  }
+});
+
+test('quad chairs sway at both automatic terminal speed transitions', () => {
+  const operations = createLiftOperations(true);
+  const { config, chairDistances } = operations;
+  const swing = { pitch: 0, angularSpeed: 0 };
+  const dt = 1 / 60;
+  let departurePitch = 0;
+  let arrivalPitch = 0;
+  operations.advance(0);
+  for (;;) {
+    const distance = chairDistances[0];
+    const along = config.start + distance;
+    if (along > config.unloading) break;
+    advanceCarrierSwing(swing, operations.speedAt(distance), dt, config.chairDrop);
+    if (along < config.boarding + 25) departurePitch = Math.min(departurePitch, swing.pitch);
+    if (along > config.unloading - 20) arrivalPitch = Math.max(arrivalPitch, swing.pitch);
+    operations.advance(dt);
+  }
+  assert.ok(departurePitch < -.04);
+  assert.ok(arrivalPitch > .04);
 });

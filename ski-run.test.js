@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { courses, places, terrainHeight, liftExitPose, exitRunLength } from './resort.js';
+import { courses, places, terrainHeight, liftExitPose, liftExitProgress, liftExitClearsCarrier, exitRunLength } from './resort.js';
 import { createSkiRun } from './ski-run.js';
 import { createLiftOperations } from './lift-operation.js';
 
@@ -87,6 +87,30 @@ test('every station exit runs forward to a level clearing', () => {
     }
     for (const side of [-5, 0, 5]) {
       assert.ok(Math.abs(terrainHeight(end.x + side, end.along + 4) - end.y) < 1e-8);
+    }
+  }
+});
+
+test('skiers in every seat clear the arriving chair before standing and stay ahead', () => {
+  for (const [quad, upperPair] of [[false, false], [true, false], [false, true]]) {
+    const lift = createLiftOperations(quad, upperPair);
+    const { upper, summit, unloading, start, glideSeconds, stationSpeed } = lift.config;
+    const chair = { set(x, y, z) { Object.assign(this, {x, y, z}); } };
+    const seats = quad ? [-.96, -.32, .32, .96] : [-.375, .375];
+    for (const seatX of seats) {
+      let stoodAt;
+      for (let i = 0; i <= 720; i++) {
+        const elapsed = i * .01;
+        const yaw = lift.liftPose(unloading - start + elapsed * stationSpeed, chair);
+        const glide = liftExitProgress(elapsed, glideSeconds, quad);
+        const point = liftExitPose(upper, summit, glide * exitRunLength);
+        const x = point.x + seatX * (1 + 1.3 * Math.sin(glide * Math.PI));
+        const clear = liftExitClearsCarrier(x, point.along, chair, yaw, quad);
+        if (i === 0) assert.equal(clear, false);
+        if (clear) stoodAt ??= elapsed;
+        if (stoodAt !== undefined) assert.ok(clear);
+      }
+      assert.ok(stoodAt > 0 && stoodAt < .6);
     }
   }
 });

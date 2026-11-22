@@ -1,9 +1,9 @@
 import { createMovingInstances } from './render-optimization.js';
 import { createRideSoundEvents } from './ride-sound-events.js';
 import * as THREE from './node_modules/three/build/three.module.js';
-import { courses, terrainHeight } from './resort.js';
+import { courses, terrainHeight, liftExitClearsCarrier } from './resort.js';
 import { addResortTerrain, addResortScenery } from './resort-view.js';
-import { createLiftOperations } from './lift-operation.js';
+import { advanceCarrierSwing, createLiftDrive, createLiftOperations, queueSpacing } from './lift-operation.js';
 import { createStationView } from './station-view.js';
 import { createRideCamera } from './ride-camera.js';
 import { createSkiRun } from './ski-run.js';
@@ -11,7 +11,7 @@ import { createRideAudio } from './ride-audio.js';
 import * as pairChime from './ping1.mjs';
 import * as quadChime from './ping2.mjs';
 import * as jointClip from './joint.mjs';
-import { createPopulation, createPlayerModel, poseSitting, queueSpacing } from './people.js';
+import { createPopulation, createPlayerModel, poseSitting } from './people.js';
 import { createChairModel, chairParts, poseDetachableGrip } from './lift-model.js';
 
 const liftSelect = document.querySelector('#lift-choice');
@@ -23,7 +23,10 @@ function openLift(lift) {
   const url = new URL(location.href);
   if (lift !== 'pair') url.searchParams.set('lift', lift);
   else url.searchParams.delete('lift');
-  sessionStorage.setItem('lift-transition', JSON.stringify({mode: staffView.value ? 'staff' : 'passenger', sound: audio.isEnabled()}));
+  sessionStorage.setItem('lift-transition', JSON.stringify({
+    destination: url.href, mode: staffView.value ? 'staff' : 'passenger', sound: audio.isEnabled(),
+  }));
+  loadingScreen.showModal();
   location.assign(url);
 }
 liftSelect.addEventListener('change', () => openLift(liftSelect.value));
@@ -124,6 +127,10 @@ const { camera } = rideCamera;
 const player = createPlayerModel(scene);
 const viewMode = document.querySelector('#view-mode');
 const staffView = document.querySelector('#staff-view');
+const liftStop = document.querySelector('#lift-stop');
+const liftStart = document.querySelector('#lift-start');
+const drive = createLiftDrive();
+let stopRequested = false;
 staffView.value = '';
 staffView.addEventListener('change', () => {
   const active = Boolean(staffView.value);
@@ -138,7 +145,11 @@ const playerTarget = new THREE.Vector3();
 
 function updateThirdPerson(state, chair, skier, pose) {
   const active = !staffView.value && thirdPerson && !rideCamera.isInspecting();
-  const sitting = active && state.phase === 'riding' && !skier.running && !skier.arrived;
+  const dismounting = state.phase === 'unloading';
+  const carrier = chair.parent;
+  const waitingForClearance = dismounting && !liftExitClearsCarrier(
+    pose.position.x, -pose.position.z, carrier.position, carrier.rotation.y, quad, chair.rotation.x, chairDrop);
+  const sitting = active && (state.phase === 'riding' || waitingForClearance) && !skier.running && !skier.arrived;
   player.seated.visible = sitting;
   player.standing.visible = active && !sitting;
   if (!active) return;
@@ -149,7 +160,7 @@ function updateThirdPerson(state, chair, skier, pose) {
     yaw = chair.parent.rotation.y;
     player.seated.position.set(seatX, -chairDrop + .12, 0);
     chair.localToWorld(player.seated.position);
-    const settle = 1 - state.sitProgress;
+    const settle = dismounting ? 0 : 1 - state.sitProgress;
     player.seated.position.y += .10 * settle;
     player.seated.position.z += (state.along - loadingStop) * settle;
     const snowY = state.along < boarding + 65
@@ -209,9 +220,11 @@ const chairs = Array.from({ length: chairCount }, (_, index) => {
 });
 const parts = quad ? chairs.map(chairParts) : [];
 const carriers = chairs.map(chair => chair.getObjectByName('chair-carrier'));
+const chairSwings = chairs.map(() => ({ pitch: 0, angularSpeed: 0, speed: undefined }));
 // Keep the animated grip, safety bar and articulated legs near the viewer.
 const simplifiedChairs = chairs.map(() => {
   const model = new THREE.Group();
+  model.rotation.order = 'YXZ';
   const width = quad ? 2.75 : 1.55;
   box(.13, chairDrop - .23, .15, steel, 0, -chairDrop / 2, .19, model);
   box(width, .14, .60, dark, 0, -chairDrop + .09, 0, model);
@@ -236,13 +249,14 @@ function updateChairDetail(reservedChair) {
     const simplified = simplifiedChairs[index];
     simplified.visible = !detailed;
     simplified.position.copy(chair.position);
-    simplified.rotation.y = chair.rotation.y;
+    simplified.position.y += carriers[index].position.y;
+    simplified.rotation.set(carriers[index].rotation.x, chair.rotation.y, 0);
   }
 }
 
 const skiEye = new THREE.Vector3();
 const population = createPopulation(scene, courses, terrainHeight, chairs, {
-  quad, chairDrop, simplifiedChairs, start, loadingStop, boardingContact, unloading, loopLength, climbStart, x: lower.x, platformY, seatXs, waitingDepth, waitingOffset,
+  quad, upperPair, upper: operations.config.upper, summit: operations.config.summit, glideSeconds: operations.config.glideSeconds, chairDrop, simplifiedChairs, start, loadingStop, boardingContact, unloading, loopLength, climbStart, x: lower.x, platformY, seatXs, waitingDepth, waitingOffset,
 });
 const updateDistantInstances = createMovingInstances(scene, simplifiedChairs);
 const speedReadout = document.querySelector('#line-speed');
@@ -263,7 +277,8 @@ const labels = {
 function setPhase(next) {
   shownPhase = next;
   const courseIndex = Number(courseSelect.value);
-  status.textContent = next === 'skiing' ? courses[courseIndex].name + 'を滑走中'
+  status.textContent = staffView.value ? staffStatus()
+    : next === 'skiing' ? courses[courseIndex].name + 'を滑走中'
 
     : labels[next];
   status.dataset.phase = next;
@@ -279,6 +294,24 @@ function setPhase(next) {
   lookHelp.hidden = !staffView.value && !thirdPerson && (next === 'skiing' || next === 'skiArrived');
   speedControl.disabled = next === 'finished' || next === 'skiing' || next === 'skiArrived';
 }
+
+function staffStatus() {
+  if (stopRequested) return drive.speedRatio === 0 ? 'リフト停止中' : 'リフト減速中';
+  return drive.speedRatio === 1 ? 'リフト運転中' : 'リフト加速中';
+}
+
+function setLiftStopped(stopped) {
+  if (!started || !staffView.value || stopRequested === stopped) return;
+  stopRequested = stopped;
+  liftStop.disabled = stopped;
+  liftStart.disabled = !stopped;
+  previousTime = undefined;
+  setPhase(state.phase);
+  (stopped ? liftStart : liftStop).focus();
+}
+
+liftStop.addEventListener('click', () => setLiftStopped(true));
+liftStart.addEventListener('click', () => setLiftStopped(false));
 
 function begin() {
   operations.begin();
@@ -299,9 +332,9 @@ skiButton.addEventListener('click', () => {
   ski.begin(Number(courseSelect.value), quad);
   rideCamera.reset();
   setPhase('skiing');
-  if (!sessionStorage.getItem('ski-rotation-tip') && matchMedia('(pointer: coarse) and (orientation: portrait) and (max-width: 600px)').matches) {
+  const tip = document.querySelector('#rotation-tip');
+  if (tip && !sessionStorage.getItem('ski-rotation-tip') && matchMedia('(pointer: coarse) and (orientation: portrait) and (max-width: 600px)').matches) {
     sessionStorage.setItem('ski-rotation-tip', 'shown');
-    const tip = document.querySelector('#rotation-tip');
     tip.hidden = false;
     setTimeout(() => { tip.hidden = true; }, 4500);
   }
@@ -320,6 +353,12 @@ skiReturn.addEventListener('click', () => {
 
 const trailMap = document.querySelector('#trail-map');
 const titleScreen = document.querySelector('#title-screen');
+const loadingScreen = document.querySelector('#loading-screen');
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  loadingScreen.close();
+  liftSelect.value = quad ? 'quad' : upperPair ? 'pair2' : 'pair';
+});
 const startForm = document.querySelector('#start-experience');
 const startButton = document.querySelector('#start-button');
 let started = false;
@@ -352,13 +391,11 @@ function updateChairPoses() {
   for (const [i, chair] of chairs.entries()) {
     const distance = chairDistances[i];
     chair.rotation.y = liftPose(distance, chair.position);
-    if (quad) {
-      const mechanics = mechanicsAt(distance);
-      chair.position.y -= mechanics.carrierDrop;
-    }
+    if (quad) chair.position.y -= operations.config.railDrop * operations.railSupport(distance);
     operations.carrierMotionAt(distance, carrierMotion);
-    carriers[i].rotation.x = carrierMotion.pitch;
-    carriers[i].position.y = carrierMotion.bounce;
+    const clearance = operations.carrierSwingClearanceAt(distance);
+    carriers[i].rotation.x = clearance * (chairSwings[i].pitch + carrierMotion.pitch);
+    carriers[i].position.y = clearance * carrierMotion.bounce;
   }
 }
 
@@ -369,28 +406,40 @@ function frame(time) {
   const dt = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.1);
   previousTime = time;
 
-  operations.advance(started ? dt * Number(speedControl.value) : 0);
+  const driveTime = started ? drive.advance(dt, stopRequested) : 0;
+  const multiplier = Number(speedControl.value);
+  operations.advance(driveTime * multiplier);
+  const speedRatio = drive.speedRatio;
+  for (const [i, swing] of chairSwings.entries()) {
+    advanceCarrierSwing(swing, operations.speedAt(chairDistances[i]) * speedRatio,
+      started ? dt * multiplier : 0, chairDrop);
+  }
   const { travel, ropeTravel, riderDistance, reservedChair, phase, glideElapsed, along } = state;
   if (ski.state.running && !trailMap.open) ski.advance(dt, skiingInput());
   const playerPhase = ski.state.running ? 'skiing' : ski.state.arrived ? 'skiArrived' : phase;
   if (shownPhase !== playerPhase) setPhase(playerPhase);
+  if (staffView.value && status.textContent !== staffStatus()) status.textContent = staffStatus();
 
-  const riderChair = ['waiting', 'boarding', 'riding'].includes(phase) ? reservedChair : -1;
-  const playerRow = phase === 'waiting' || phase === 'boarding' ? state.queueRow : -1;
+  const riderChair = !staffView.value && ['waiting', 'boarding', 'riding', 'unloading'].includes(phase) ? reservedChair : -1;
+  const playerRow = !staffView.value && (phase === 'waiting' || phase === 'boarding') ? state.queueRow : -1;
   population.advanceBoarding(chairDistances, riderChair, travel);
 
-  const terminal = quad ? operations.terminalModeAt(riderDistance) : null;
-  const speedText = ski.state.running ? (ski.state.speed * 3.6).toFixed(0) + ' km/h'
+  const waiting = phase === 'waiting' || phase === 'boarding';
+  const liftSpeed = waiting ? operations.config.stationSpeed : operations.speedAt(riderDistance);
+  const terminal = quad ? waiting ? 'station' : operations.terminalModeAt(riderDistance) : null;
+  const speedText = staffView.value ? (operations.config.mainSpeed * speedRatio).toFixed(2) + ' m/s（本線・1倍時）'
+    : ski.state.running ? (ski.state.speed * 3.6).toFixed(0) + ' km/h'
     : phase === 'arrived' || phase === 'finished' ? ''
     : quad && phase === 'unloading' && glideElapsed > 1.65 ? '緩斜面を滑走中'
-      : operations.speedAt(riderDistance).toFixed(2) + ' m/s（1倍時）' + (quad ? ' · ' + terminalLabels[terminal] : '');
+      : liftSpeed.toFixed(2) + ' m/s（1倍時）' + (quad ? ' · ' + terminalLabels[terminal] : '');
   if (speedReadout.textContent !== speedText) speedReadout.textContent = speedText;
   const stationZone = phase === 'waiting' || phase === 'boarding' || phase === 'unloading'
     || (phase === 'riding' && (state.along < boarding + 24 || state.along > unloading - 24));
   const staffArea = staffView.value;
   const quiet = !started || trailMap.open || document.hidden;
+  const boardingEnabled = !stopRequested && speedRatio === 1;
   const queue = operations.boardingQueueAt(travel);
-  soundEvents.update({ phase, along, riderDistance, queue, staffArea, quiet,
+  soundEvents.update({ phase, along, riderDistance, queue, staffArea, quiet: quiet || !boardingEnabled,
     skiing: ski.state.running || ski.state.arrived });
   const { start: baseWheel, end: summitWheel } = operations.config;
   const wheelDistance = Math.min(Math.abs(along - baseWheel), Math.abs(along - summitWheel));
@@ -398,7 +447,8 @@ function frame(time) {
     ? 1 - THREE.MathUtils.smoothstep(wheelDistance, 4, 24) : 0;
   audio.update({
     zone: staffArea ? 'station' : ski.state.running ? 'ski' : ski.state.arrived ? 'silent' : stationZone ? 'station' : phase === 'riding' ? 'line' : 'silent',
-    speed: ski.state.running ? ski.state.speed : operations.speedAt(riderDistance),
+    speed: ski.state.running ? ski.state.speed : liftSpeed * speedRatio,
+    motorSpeedRatio: speedRatio,
     motorLevel,
     jointPhase: !staffArea && phase === 'riding' && (terminal === 'accelerate' || terminal === 'decelerate') ? terminal : null,
     quad, quiet,
@@ -408,7 +458,7 @@ function frame(time) {
     nextRenderTime = Math.max(nextRenderTime + renderInterval, time);
     updateChairPoses();
     population.updateSkiers(travel);
-    station.updateBoardingSignal(queue.green);
+    station.updateBoardingSignal(boardingEnabled && queue.green);
     const skier = ski.state;
     const pose = skier.running || skier.arrived
       ? { position: skiEye.set(skier.x, terrainHeight(skier.x, skier.along) + 1.58, -skier.along), heading: skier.yaw, incline: -.135, lean: skier.lean }
@@ -423,17 +473,25 @@ function frame(time) {
     listenerUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
     audio.setListener(camera.position, listenerForward, listenerUp);
     if (resizeNeeded) resize();
-    station.renderAt(travel, ropeTravel);
     updateDistantInstances(camera);
+    station.renderAt(travel, ropeTravel, camera);
     renderer.render(scene, camera);
+    if (arrivingFromTransition) {
+      arrivingFromTransition = false;
+      loadingScreen.close();
+    }
   }
   requestAnimationFrame(frame);
 }
 
-function startExperience(mode, sound) {
+let arrivingFromTransition = false;
+export function startExperience(mode, sound) {
+  arrivingFromTransition = loadingScreen.open;
   const staff = mode === 'staff';
   staffView.value = staff ? 'boarding' : '';
   document.querySelector('#staff-controls').hidden = !staff;
+  liftStop.hidden = !staff;
+  liftStart.hidden = !staff;
   staffView.dispatchEvent(new Event('change'));
   begin();
   if (sound) void audio.setEnabled(true);
@@ -451,10 +509,4 @@ window.addEventListener('resize', onResize);
 resize();
 begin();
 startButton.disabled = false;
-const transition = sessionStorage.getItem('lift-transition');
-if (transition) {
-  sessionStorage.removeItem('lift-transition');
-  const { mode, sound } = JSON.parse(transition);
-  startExperience(mode, sound);
-}
 requestAnimationFrame(frame);

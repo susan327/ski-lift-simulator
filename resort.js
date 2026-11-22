@@ -23,7 +23,7 @@ function stretchBeginner(along) {
 }
 
 export const places = {
-  base: { name: 'ベースロッジ', x: 124, along: -302 },
+  base: { name: 'ベースロッジ', x: 132, along: -303 },
   pairBase: { name: '第1ペア麓駅', x: 117, along: -288 },
   pairTop: { name: '第1ペア上駅', x: 158, along: 12 },
   pairUpperBase: { name: '第2ペア中腹駅', x: 75, along: 541 },
@@ -149,6 +149,22 @@ export const exitRunLength = 18;
 const exitGrade = .085;
 const exitDrop = progress => exitGrade
   * (Math.max(0, progress - 1.6) - Math.max(0, progress - 12));
+
+export function liftExitProgress(elapsed, seconds, quad) {
+  const t = Math.max(0, Math.min(1, elapsed / seconds));
+  // A positive push-off speed keeps the skier ahead of the fixed-grip carrier.
+  const pushOff = quad ? 1.15 : 1.8;
+  return t * t * (3 - 2 * t) + pushOff * t * (1 - t) ** 2;
+}
+
+export function liftExitClearsCarrier(x, along, chair, yaw, quad, pitch = 0, chairDrop = 0) {
+  const dx = x - chair.x;
+  const dz = -along - chair.z;
+  const lateral = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+  const forward = -dx * Math.sin(yaw) - dz * Math.cos(yaw) - chairDrop * Math.sin(pitch);
+  // The occupied rectangle includes the seat frame and a standing skier's torso.
+  return Math.abs(lateral) >= (quad ? 1.68 : 1.10) || forward >= .76 || forward <= -.70;
+}
 
 export function liftExitPose(upper, floor, distance) {
   const progress = Math.max(0, Math.min(distance, exitRunLength));

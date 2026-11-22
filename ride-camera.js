@@ -1,5 +1,5 @@
 import * as THREE from './node_modules/three/build/three.module.js';
-import { liftExitPose, exitRunLength } from './resort.js';
+import { liftExitPose, liftExitProgress, exitRunLength } from './resort.js';
 
 export function createRideCamera(canvas, gripView, config, { waitingDepth, waitingOffset, platformY, seatXs }) {
   const { quad, lower, upper, boarding, loadingStop, waitingAlong, unloading, summit, chairDrop,
@@ -64,7 +64,7 @@ export function createRideCamera(canvas, gripView, config, { waitingDepth, waiti
       const openLine = THREE.MathUtils.smoothstep(Math.min(along - boarding, unloading - along), 15, 47);
       incline = -.16 * openLine * sitProgress;
     } else {
-      const glide = THREE.MathUtils.smoothstep(glideElapsed, 0, glideSeconds);
+      const glide = liftExitProgress(glideElapsed, glideSeconds, quad);
       const landing = THREE.MathUtils.smoothstep(glideElapsed, 0, 1.25);
       const point = liftExitPose(upper, summit, glide * exitRunLength);
       pose.set(point.x + seatXs[quad ? 1 : 0] * (1 - landing),

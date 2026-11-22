@@ -1,11 +1,51 @@
 import { places, liftGround, quadLiftGround, quadLine, pairLine, upperPairLine, upperPairGround } from './resort.js';
 import { createLiftMotion } from './lift-motion.js';
 
+export const queueRows = 3;
+export const queueSpacing = 1.22;
+
 const lerp = (a,b,t) => (1 - t) * a + t * b;
 const modulo = (value, length) => ((value % length) + length) % length;
 function smoothstep(value,min,max) {
   const t = Math.max(0,Math.min(1,(value-min)/(max-min)));
   return t*t*(3-2*t);
+}
+
+export function createLiftDrive() {
+  let speedRatio = 1;
+  return {
+    get speedRatio() { return speedRatio; },
+    advance(seconds, stopRequested) {
+      const target = stopRequested ? 0 : 1;
+      const rampSeconds = stopRequested ? 3 : 4;
+      const rampTime = Math.min(seconds, Math.abs(target - speedRatio) * rampSeconds);
+      const before = speedRatio;
+      speedRatio = Math.abs(target - before) * rampSeconds <= seconds
+        ? target : before + Math.sign(target - before) * rampTime / rampSeconds;
+      return rampTime * (before + speedRatio) / 2 + (seconds - rampTime) * target;
+    },
+  };
+}
+
+export function advanceCarrierSwing(swing, speed, seconds, length) {
+  if (seconds <= 0 || swing.speed === undefined) {
+    swing.speed = speed;
+    return;
+  }
+
+  const acceleration = (speed - swing.speed) / seconds;
+  swing.speed = speed;
+  const gravity = 9.81;
+  const damping = 2 * .32 * Math.sqrt(gravity / length);
+  // Integrate the suspended chair in the accelerating grip's frame.
+  const steps = Math.ceil(seconds * 120);
+  const step = seconds / steps;
+  for (let i = 0; i < steps; i++) {
+    const angularAcceleration = (-gravity * Math.sin(swing.pitch)
+      - acceleration * Math.cos(swing.pitch)) / length - damping * swing.angularSpeed;
+    swing.angularSpeed += angularAcceleration * step;
+    swing.pitch += swing.angularSpeed * step;
+  }
 }
 
 export function createLiftOperations(quad, upperPair = false) {
@@ -168,6 +208,17 @@ export function createLiftOperations(quad, upperPair = false) {
     };
   }
 
+  function carrierSwingClearanceAt(distance) {
+    const d = modulo(distance, loopLength);
+    const outbound = d <= lineLength;
+    if (!outbound && (d < lineLength + turnLength || d >= baseTurn)) return 0;
+    const along = outbound ? start + d : end - (d - lineLength - turnLength);
+    const releaseStart = quad ? loadingStop + 1.1 : climbStart;
+    const feetOffSnow = smoothstep(along, releaseStart, releaseStart + 3);
+    const beforeLanding = 1 - smoothstep(along, unloading - 5, unloading - 1);
+    return feetOffSnow * beforeLanding;
+  }
+
   function carrierMotionAt(distance, result) {
     const d = modulo(distance, loopLength);
     const uphill = d <= lineLength;
@@ -178,14 +229,6 @@ export function createLiftOperations(quad, upperPair = false) {
     const along = uphill ? start + d : end - (d - lineLength - turnLength);
     const direction = uphill ? 1 : -1;
     const speed = speedAt(d);
-    if (quad && (Math.abs(along - (boarding + 10)) < 14 || Math.abs(along - (unloading - 10)) < 14)) {
-      const time = motion.secondsAt(d);
-      const speedNow = speedAt(motion.distanceAt(time - .12));
-      const speedBefore = speedAt(motion.distanceAt(time - .48));
-      const speedEarlier = speedAt(motion.distanceAt(time - .92));
-      result.pitch = Math.max(-.055, Math.min(.055,
-        -.065 * (speedNow - speedBefore) + .025 * (speedBefore - speedEarlier)));
-    }
     for (const tower of towerPositions) {
       const offset = (along - tower) * direction;
       if (offset < -1.25 || offset > 2.9) continue;
@@ -246,10 +289,10 @@ export function createLiftOperations(quad, upperPair = false) {
     const rideTime = state.travel - boardingTravel;
     state.sitProgress = smoothstep(rideTime, loadTime, loadTime + .55);
     state.approach = smoothstep(rideTime, boardingTime, boardingTime + boardingApproachSeconds);
-    state.queueRow = Math.max(0, Math.floor((loadTime - rideTime) / seatSpacing));
-    const timePastPreviousChair = rideTime - (loadTime - seatSpacing);
-    state.approachRowOffset = quad && state.queueRow === 0
-      ? 1 - smoothstep(timePastPreviousChair, 0, .8) : 0;
+    state.queueRow = Math.max(0, Math.ceil((loadTime - rideTime) / seatSpacing) - 1);
+    const sinceContact = modulo(rideTime - loadTime, seatSpacing);
+    state.approachRowOffset = state.queueRow < queueRows
+      ? 1 - smoothstep(sinceContact, 0, .8) : 0;
     state.riderDistance = motion.distanceAt(rideTime);
     state.along = start + state.riderDistance;
     state.glideElapsed = rideTime - unloadTime;
@@ -257,7 +300,9 @@ export function createLiftOperations(quad, upperPair = false) {
   }
 
   function begin() {
-    const nextSlot = Math.ceil((state.travel - boardingTime) / seatSpacing);
+    // The three rows already at the station board before the new rider.
+    const firstWaitingSlot = Math.floor((state.travel - loadTime) / seatSpacing) + 1;
+    const nextSlot = firstWaitingSlot + queueRows;
     boardingTravel = nextSlot * seatSpacing;
     state.reservedChair = modulo(-nextSlot, chairCount);
     state.phase = 'waiting';
@@ -265,7 +310,10 @@ export function createLiftOperations(quad, upperPair = false) {
     state.phase = 'waiting';
   }
 
+  let distancesInitialized = false;
   function advance(seconds) {
+    if (seconds === 0 && distancesInitialized) return;
+    distancesInitialized = true;
     state.travel += seconds;
     state.ropeTravel += seconds * mainSpeed;
     updateRider();
@@ -282,5 +330,5 @@ export function createLiftOperations(quad, upperPair = false) {
     mainSpeed, stationSpeed, cableHeight, chairDrop, chairCount, wheelRadius, lineLength, turnLength,
     loopLength, baseTurn, railDrop, glideSeconds, summit, handoff, towerPositions, announcementPoints };
   return { config, state, chairDistances, lineX, trackGround, ropeYAt, liftPose, speedAt, mechanicsAt,
-    handoffDistance, railSupport, railFall, gripOpen, terminalModeAt, carrierMotionAt, towerBetween, boardingQueueAt, begin, advance, finishRide };
+    handoffDistance, railSupport, railFall, gripOpen, terminalModeAt, carrierSwingClearanceAt, carrierMotionAt, towerBetween, boardingQueueAt, begin, advance, finishRide };
 }
