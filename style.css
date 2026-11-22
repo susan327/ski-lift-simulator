@@ -1,0 +1,210 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #132e35;
+  color: #f8fcff;
+  font: 1rem system-ui, sans-serif;
+}
+main { position: relative; height: 100dvh; min-height: 320px; }
+#view { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#view:active { cursor: grabbing; }
+header, .controls {
+  position: absolute;
+  left: clamp(12px, 3vw, 36px);
+  max-width: calc(100% - 24px);
+  padding: 12px 16px;
+  background: #132e35ed;
+  border-radius: 8px;
+}
+header { top: clamp(12px, 3vw, 36px); }
+h1 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.8rem); }
+p { margin: 6px 0 0; }
+.controls { bottom: clamp(12px, 3vw, 36px); }
+.controls p { color: #d2e4e7; font-size: .85rem; }
+button, select {
+  border: 1px solid #a9cbd1;
+  border-radius: 4px;
+  color: inherit;
+  background: #24474f;
+  padding: 7px 10px;
+  font: inherit;
+}
+button { cursor: pointer; }
+
+.map-toggle {
+  position: absolute;
+  top: clamp(12px, 3vw, 36px);
+  right: clamp(12px, 3vw, 36px);
+}
+dialog {
+  width: min(860px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 16px;
+  color: #f8fcff;
+  background: #132e35;
+  border: 1px solid #92b6bf;
+  border-radius: 12px;
+}
+dialog::backdrop { background: #071d24b8; }
+#loading-screen[open] {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: #132e35;
+}
+#loading-message { margin: 0; font-size: 1.25rem; font-weight: 700; }
+.map-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+h2 { font-size: 1.2rem; margin: 0; }
+.map-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .85fr); gap: 16px; }
+#map-view { display: block; width: 100%; height: auto; border-radius: 8px; }
+.map-legend { color: #d2e4e7; font-size: .9rem; margin: 0 0 12px; }
+.trail-list { margin: 0; padding: 0; list-style: none; }
+.trail-list li + li { margin-top: 8px; }
+.course-choice { display: grid; gap: 4px; width: 100%; text-align: left; border-left: .5rem solid var(--course-color); }
+.course-choice span { font-size: .9rem; color: #e0edf1; }
+.course-choice[aria-pressed=true] { background: #3b636c; box-shadow: inset 0 0 0 1px #c5e3ea; }
+@media (max-width: 640px) {
+  .map-body { grid-template-columns: minmax(0, 1fr); }
+  #map-view { max-height: 55vh; object-fit: contain; background: #dcebf0; }
+  header { max-width: calc(100% - 128px); }
+}
+
+
+#title-screen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #132e35;
+}
+#title-screen[open] {
+  display: grid;
+  align-items: center;
+}
+.title-art {
+  position: absolute;
+  inset: 0;
+  background: #87b4d1 url("./title-resort.webp") 50% 49% / cover no-repeat;
+}
+.title-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #102a35b8 0%, #12334554 36%, transparent 68%);
+}
+.title-menu {
+  position: relative;
+  justify-self: start;
+  width: min(374px, calc(100% - 48px));
+  margin-inline-start: clamp(24px, 6vw, 100px);
+  padding: clamp(20px, 3vw, 34px);
+  border-radius: 14px;
+  border: 1px solid #adced38c;
+  color: #f8fcff;
+  background: #102e3aeb;
+}
+#title-heading { margin: 0 0 1.1rem; font-size: clamp(1.8rem, 4.3vw, 2.8rem); line-height: 1.17; }
+#start-experience fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.05rem;
+  margin: 0 0 1rem;
+  padding: .6rem .8rem .8rem;
+  border: 1px solid #86aeb9;
+  border-radius: 7px;
+}
+#start-experience label { display: flex; align-items: center; gap: .25rem; cursor: pointer; min-height: 32px; }
+#start-experience input { accent-color: #6be1bc; margin: 0; }
+#start-button { width: 100%; min-height: 44px; background: #e5f7f2; color: #143c42; border: 0; font-weight: 700; }
+#start-button:focus-visible, #start-experience input:focus-visible { outline: 3px solid #79f0cb; outline-offset: 3px; }
+#start-button:disabled { opacity: .65; }
+
+@media (max-width: 700px) {
+  #title-screen[open] { align-items: end; }
+  .title-art { bottom: min(26%, 168px); background-position: 69% 50%; }
+  .title-art::after { background: linear-gradient(0deg, #132e35 0%, transparent 37%); }
+  .title-menu {
+    justify-self: center;
+    margin: 0 0 max(12px, env(safe-area-inset-bottom));
+    background: #102e3af5;
+  }
+}
+
+[hidden] { display: none !important; }
+#title-heading { margin-bottom: .3rem; font-size: clamp(1.55rem, 4.2vw, 2.8rem); }
+#title-heading span { display: block; }
+.title-resort { margin: 0 0 1rem; color: #d0e7ea; }
+#install-app { margin: .7rem auto 0; display: block; background: transparent; border: 0; text-decoration: underline; }
+#install-guide { max-width: 440px; }
+#install-guide h3 { margin: 1rem 0 .4rem; font-size: 1rem; }
+#install-guide p { line-height: 1.55; }
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .38rem .5rem;
+  bottom: max(12px, env(safe-area-inset-bottom));
+}
+.controls > p { flex-basis: 100%; }
+#ski-controls {
+  position: absolute;
+  z-index: 2;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+#ski-controls > div { display: flex; gap: .35rem; }
+#ski-controls button { min-width: 48px; min-height: 48px; pointer-events: auto; touch-action: none; }
+main:has(#ski-controls:not([hidden])) .controls { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 57px); }
+#rotation-tip {
+  position: absolute;
+  top: 32%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  background: #132e35f2;
+  border-radius: 6px;
+  padding: .6rem .8rem;
+  pointer-events: none;
+}
+@media (orientation: landscape) {
+  #rotation-tip { display: none; }
+}
+@media (orientation: landscape) and (max-height: 550px) {
+  #title-screen[open] { align-items: center; }
+  .title-art { bottom: 0; background-position: center 44%; }
+  .title-art::after { background: linear-gradient(90deg, #102a3588 0%, transparent 68%); }
+  .title-menu { justify-self: start; width: min(335px, 46vw); margin: 0 0 0 max(16px, env(safe-area-inset-left)); padding: 14px 18px; }
+  #title-heading { font-size: clamp(1.25rem, 4.3vh, 1.9rem); }
+  .title-resort { margin-bottom: .45rem; }
+  #start-experience fieldset { margin-bottom: .45rem; padding-block: .2rem .35rem; }
+  .controls { max-width: min(76vw, 660px); padding: 7px 10px; }
+  .controls button, .controls select { padding: 4px 6px; }
+  .map-body { grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); }
+  #map-view { max-height: 66dvh; object-fit: contain; background: #dcebf0; }
+}
+@media (orientation: portrait) and (max-width: 600px) {
+  .controls { right: 12px; left: 12px; max-width: none; padding: 8px; gap: .35rem; }
+  .controls button, .controls select { min-height: 36px; padding: 4px 7px; }
+  #ski-controls { justify-content: center; gap: .5rem; }
+}

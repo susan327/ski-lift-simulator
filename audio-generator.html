@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リフト音源ジェネレーター</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#14232c;color:#eef6fb}main{max-width:46rem;margin:3rem auto;padding:0 1rem}fieldset{border:1px solid #50717d;border-radius:.5rem;padding:1rem;margin:1.2rem 0}legend{font-weight:bold}label{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.65rem 0}input,select,button{font:inherit;padding:.4rem}input[type=number]{width:6rem}audio{display:block;width:100%;margin:.8rem 0}.actions{display:flex;gap:.6rem;flex-wrap:wrap}output{display:block;color:#ffc7a3}
+</style>
+</head>
+<body><main>
+<h1>リフト音源ジェネレーター</h1>
+<label>音源<select id="preset"><option value="joint">ジョイント通過音</option><option value="ping1">ピンポン 1</option><option value="ping2">ピンポン 2</option></select></label>
+<form id="editor"><fieldset id="settings"><legend>音の設定</legend></fieldset><div class="actions"><button>試聴</button><button type="submit" id="save">コードを保存</button></div></form>
+<audio controls id="player"></audio><output id="status" aria-live="polite"></output>
+</main>
+<script>
+const presets = {
+  joint: { tone: 1050, body: 500, duration: 81, start: 5, end: 13, count: 22, level: 75 },
+  ping1: { high: 83, low: 79, wave: 'doorbell', strike: 65, brightness: 55, metallic: 50, gap: 350, duration: 800, tail: 'natural', transition: 'overlap', bridge: 25, waveform: 'preset', level: 75 },
+  ping2: { high: 78, low: 71, wave: 'digital', strike: 35, brightness: 45, metallic: 10, gap: 150, duration: 85, tail: 'short', transition: 'separate', bridge: 36, waveform: 'sine', level: 75 }
+};
+const jointFields = [
+  ['tone','金属音の中心周波数 (Hz)',250,3500], ['body','打撃音の音程 (Hz)',100,1400],
+  ['duration','1打の長さ (ms)',20,180], ['start','開始時の打数／秒',2,24],
+  ['end','終了時の打数／秒',2,24], ['count','合計打数',2,60]
+];
+const chimeFields = [
+  ['high','高音の音程'], ['low','低音の音程'],
+  ['wave','共通の音色'], ['waveform','共通の波形'],
+  ['strike','打撃感 (%)',0,100], ['brightness','明るさ (%)',0,100],
+  ['metallic','金属感 (%)',0,100],
+  ['transition','2音のつなぎ方'], ['gap','2音目を鳴らす位置 (ms)',55,900],
+  ['bridge','無音／切り替えの長さ (ms)',0,250], ['duration','1音の長さ (ms)',25,1500], ['tail','音の切れ方']
+];
+const timbres = {
+  doorbell:'玄関チャイム（キンコン）', metal:'金属ベル', bell:'丸いベル',
+  soft:'やわらかい電子音', clear:'澄んだ電子音', digital:'デジタルチャイム',
+  buzzer:'ブザー風の電子音'
+};
+const tails = {natural: '自然に消える', short: '短く切る（電子音）'};
+const transitions = {overlap:'余韻を重ねる', separate:'無音を挟む', blend:'滑らかに切り替える'};
+const waveforms = {preset:'音色の標準波形', sine:'サイン波', triangle:'三角波', square:'矩形波', saw:'のこぎり波'};
+const noteNames = ['ド','ド♯','レ','レ♯','ミ','ファ','ファ♯','ソ','ソ♯','ラ','ラ♯','シ'];
+const notes = Object.fromEntries(Array.from({length:48}, (_, i) => {
+  const midi = 48 + i;
+  return [midi, noteNames[midi % 12] + (Math.floor(midi / 12) - 1)];
+}));
+const noteFrequency = midi => 440 * 2 ** ((midi - 69) / 12);
+const preset = document.querySelector('#preset');
+const form = document.querySelector('#editor');
+const settings = document.querySelector('#settings');
+const player = document.querySelector('#player');
+const status = document.querySelector('#status');
+let current = preset.value;
+let objectURL;
+const sampleRate = 44100;
+const tau = Math.PI * 2;
+
+function renderFields() {
+  const fields = current === 'joint' ? jointFields : chimeFields;
+  settings.replaceChildren(settings.querySelector('legend'));
+  const options = {high:notes, low:notes, wave:timbres, waveform:waveforms, transition:transitions, tail:tails};
+  for (const [key, title, min, max] of [...fields, ['level','音量 (%)',1,100]]) {
+    const label = document.createElement('label');
+    const input = document.createElement(min === undefined ? 'select' : 'input');
+    label.textContent = title;
+    if (min === undefined) {
+      const choices = options[key];
+      for (const [id, name] of Object.entries(choices)) input.add(new Option(name,id));
+    } else {
+      Object.assign(input,{type:'number',min,max,required:true});
+    }
+    input.name = key;
+    input.value = presets[current][key];
+    if (key === 'bridge') input.disabled = presets[current].transition === 'overlap';
+    label.append(input);
+    settings.append(label);
+  }
+}
+settings.addEventListener('input', event => {
+  const field = event.target;
+  const pitch = field.name === 'high' || field.name === 'low';
+  if (field.validity.valid) presets[current][field.name] = pitch || field.type === 'number' ? Number(field.value) : field.value;
+  if (field.name === 'transition') form.elements.bridge.disabled = field.value === 'overlap';
+  status.textContent = '';
+});
+preset.addEventListener('change', () => {
+  current = preset.value;
+  status.textContent = '';
+  renderFields();
+});
+
+function toneWave(phase, shape, frequency) {
+  if (shape === 'sine') return Math.sin(phase);
+  let sum = 0;
+  const harmonics = Math.min(13, Math.floor(sampleRate / (2 * frequency)));
+  for (let k = 1; k <= harmonics; k++) {
+    if (shape !== 'saw' && k % 2 === 0) continue;
+    const amplitude = shape === 'triangle' ? (-1) ** ((k - 1) / 2) / k ** 2
+      : shape === 'saw' ? (-1) ** (k - 1) / k : 1 / k;
+    sum += amplitude * Math.sin(k * phase);
+  }
+  return sum * (shape === 'square' ? .80 : shape === 'saw' ? .64 : .81);
+}
+
+function synthesize(kind, p) {
+  const joint = kind === 'joint';
+  const length = p.duration / 1000;
+  const times = [0];
+  if (joint) {
+    for (let hit = 1; hit < p.count; hit++) {
+      const rate = p.start + (p.end - p.start) * (hit - 1) / Math.max(1,p.count - 2);
+      times.push(times.at(-1) + 1 / rate);
+    }
+  } else {
+    const gap = p.gap / 1000;
+    times.push(p.transition === 'blend' ? Math.min(gap, Math.max(.005, length - .005))
+      : p.transition === 'separate' ? Math.max(gap, p.bridge / 1000 + .008)
+      : gap);
+  }
+  const samples = new Float32Array(Math.ceil((times.at(-1) + length + .04) * sampleRate));
+  times.forEach((at, index) => {
+    const start = Math.round(at * sampleRate);
+    const frequency = joint ? 0 : noteFrequency(index === 0 ? p.high : p.low);
+    const timbre = p.wave;
+    const attack = joint ? .004 : .019 - .00017 * p.strike;
+    const bridge = joint ? 0 : p.bridge / 1000;
+    const crossfade = !joint && p.transition === 'blend';
+    const blend = crossfade ? Math.max(.004, Math.min(bridge || .004, length - times[1])) : 0;
+    const stop = joint || index > 0 || p.transition === 'overlap' ? length
+      : crossfade ? times[1] + blend
+      : Math.min(length, times[1] - bridge);
+    let low = 0, band = 0;
+    let random = (index + 1) * 997;
+    for (let frame = 0; frame < stop * sampleRate; frame++) {
+      const t = frame / sampleRate;
+      const short = !joint && p.tail === 'short';
+      const decay = joint ? 5.5 / length : short ? 1.5 / length : 13.7;
+      const fade = short ? .007 : .016;
+      const gate = crossfade && index === 0
+        ? Math.min(1,(stop - t) / blend)
+        : Math.min(1,(stop - t) / fade);
+      const onset = crossfade && index === 1 ? blend : short ? Math.min(attack,.004) : attack;
+      const envelope = Math.min(1,t / onset) * Math.exp(-decay * t) * gate;
+      let value;
+      if (joint) {
+        random = (Math.imul(1664525,random) + 1013904223) >>> 0;
+        const noise = random / 2147483648 - 1;
+        const cutoff = 2 * Math.sin(Math.PI * p.tone / sampleRate);
+        low += cutoff * band;
+        band += cutoff * (noise - low - .75 * band);
+        const phase = tau * p.body * (t - .19 * t * t / length);
+        value = 1.5 * band + .58 * Math.sin(phase);
+      } else {
+        const phase = tau * frequency * t;
+        value = .74 * Math.sin(phase);
+        if (timbre === 'bell') value += .23 * Math.sin(phase * 2.01) * Math.exp(-8 * t) + .13 * Math.sin(phase * 3.94) * Math.exp(-14 * t);
+        if (timbre === 'clear') value += .20 * Math.sin(phase * 2) + .09 * Math.sin(phase * 3);
+        if (timbre === 'doorbell') {
+          value = .78 * Math.sin(phase)
+            + .37 * Math.sin(phase * 2.76) * Math.exp(-20 * t)
+            + .23 * Math.sin(phase * 5.39) * Math.exp(-42 * t);
+        }
+        if (timbre === 'metal') {
+          value += .30 * Math.sin(phase * 2.4) * Math.exp(-10 * t)
+            + .18 * Math.sin(phase * 4.31) * Math.exp(-19 * t);
+        }
+        if (timbre === 'digital') {
+          value = .70 * Math.sin(phase + .85 * Math.sin(phase * 2) * Math.exp(-17 * t));
+        }
+        if (timbre === 'buzzer') {
+          value = .65 * (Math.sin(phase) + .32 * Math.sin(phase * 3) + .13 * Math.sin(phase * 5));
+        }
+        if (p.waveform !== 'preset') value = .34 * value + .56 * toneWave(phase, p.waveform, frequency);
+        value += p.brightness / 100 * (.13 * Math.sin(phase * 2) + .08 * Math.sin(phase * 3));
+        value += p.metallic / 100 * .20 * Math.sin(phase * 3.71) * Math.exp(-18 * t);
+      }
+      samples[start + frame] += value * envelope * p.level / 100;
+    }
+  });
+  return samples;
+}
+
+function wav(samples) {
+  const data = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const ascii = (offset,text) => Array.from(text,(letter,index) => data.setUint8(offset+index,letter.charCodeAt(0)));
+  ascii(0,'RIFF'); data.setUint32(4,data.byteLength-8,true); ascii(8,'WAVEfmt ');
+  data.setUint32(16,16,true); data.setUint16(20,1,true); data.setUint16(22,1,true);
+  data.setUint32(24,sampleRate,true); data.setUint32(28,sampleRate*2,true);
+  data.setUint16(32,2,true); data.setUint16(34,16,true); ascii(36,'data');
+  data.setUint32(40,samples.length*2,true);
+  for (let i=0;i<samples.length;i++) data.setInt16(44+2*i,Math.round(32767*Math.max(-1,Math.min(1,samples[i]))),true);
+  return new Blob([data],{type:'audio/wav'});
+}
+
+function exportCode(kind, config) {
+  return [
+    '// リフト音源ジェネレーター',
+    'export const preset = ' + JSON.stringify({ kind, ...config }, null, 2) + ';',
+    'export const sampleRate = ' + sampleRate + ';',
+    'const tau = Math.PI * 2;',
+    'const noteFrequency = ' + noteFrequency.toString() + ';',
+    toneWave.toString(),
+    synthesize.toString(),
+    'export function createSamples() { return synthesize(preset.kind, preset); }',
+    ''
+  ].join(String.fromCharCode(10, 10));
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const p = presets[current];
+  if (current !== 'joint' && p.high <= p.low) {
+    status.textContent = '高音は低音より高い音名を選んでね。';
+    return;
+  }
+  if (event.submitter.id === 'save') {
+    const file = new Blob([exportCode(current, p)], { type: 'text/javascript;charset=utf-8' });
+    const downloadURL = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = downloadURL;
+    link.download = current + '.mjs';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(downloadURL), 30000);
+    status.textContent = link.download + ' を書き出したよ。';
+    return;
+  }
+  if (objectURL) URL.revokeObjectURL(objectURL);
+  objectURL = URL.createObjectURL(wav(synthesize(current,p)));
+  player.src = objectURL;
+  status.textContent = '';
+  try { await player.play(); }
+  catch { status.textContent = 'プレイヤーの再生ボタンから試聴してね。'; }
+});
+renderFields();
+</script>
+</body>
+</html>
