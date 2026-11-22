@@ -18,40 +18,43 @@
       <p id="status" role="status">読み込み中</p>
       <p id="line-speed"></p>
     </header>
-    <div class="controls">
-      <label>リフト
-        <select id="lift-choice">
-          <option value="pair">第1ペア</option>
-          <option value="pair2">第2ペア</option>
-          <option value="quad">クワッド</option>
-        </select>
-      </label>
-      <label>時間倍率
-        <select id="speed" disabled>
-          <option value="1">1倍</option>
-          <option value="2">2倍</option>
-          <option value="4">4倍</option>
-        </select>
-      </label>
-      <label id="staff-controls" hidden>係員視点
-        <select id="staff-view">
-          <option value="boarding">麓駅の乗車口</option>
-          <option value="unloading">山頂駅の降車口</option>
-        </select>
-      </label>
-      <button id="lift-stop" type="button" hidden>ストップ</button>
-      <button id="lift-start" type="button" hidden disabled>スタート</button>
-      <button id="view-mode" type="button" aria-pressed="false">三人称視点</button>
-      <button id="grip-view" type="button" aria-pressed="false" hidden>握索機を見る</button>
-      <button id="back-to-title" type="button">タイトルへ</button>
-      <button id="ambient" type="button" aria-pressed="false">環境音を聴く</button>
-      <label id="course-picker" hidden>滑走コース <select id="ski-course"></select></label>
-      <button id="start-ski" type="button" hidden>選んだコースを滑る</button>
-      <button id="pair-transfer" type="button" hidden>第2ペアへ乗り継ぐ</button>
-      <button id="ski-return" type="button" hidden>麓の乗り場へ</button>
-      <button id="finish" hidden>体験を終える</button>
-      <button id="restart" hidden>もう一度乗る</button>
-      <p id="look-help">ドラッグで見回す</p>
+    <div class="controls-dock">
+      <button id="toggle-controls" type="button" aria-controls="ride-controls" aria-expanded="true">パネルを最小化</button>
+      <div class="controls" id="ride-controls">
+        <label>リフト
+          <select id="lift-choice">
+            <option value="pair">第1ペア</option>
+            <option value="pair2">第2ペア</option>
+            <option value="quad">クワッド</option>
+          </select>
+        </label>
+        <label>時間倍率
+          <select id="speed" disabled>
+            <option value="1">1倍</option>
+            <option value="2">2倍</option>
+            <option value="4">4倍</option>
+          </select>
+        </label>
+        <label id="staff-controls" hidden>係員視点
+          <select id="staff-view">
+            <option value="boarding">麓駅の乗車口</option>
+            <option value="unloading">山頂駅の降車口</option>
+          </select>
+        </label>
+        <button id="lift-stop" type="button" hidden>ストップ</button>
+        <button id="lift-start" type="button" hidden disabled>スタート</button>
+        <button id="view-mode" type="button" aria-pressed="false">三人称視点</button>
+        <button id="grip-view" type="button" aria-pressed="false" hidden>握索機を見る</button>
+        <button id="back-to-title" type="button">タイトルへ</button>
+        <button id="ambient" type="button" aria-pressed="false">環境音を聴く</button>
+        <label id="course-picker" hidden>滑走コース <select id="ski-course"></select></label>
+        <button id="start-ski" type="button" hidden>選んだコースを滑る</button>
+        <button id="pair-transfer" type="button" hidden>第2ペアへ乗り継ぐ</button>
+        <button id="ski-return" type="button" hidden>麓の乗り場へ</button>
+        <button id="finish" hidden>体験を終える</button>
+        <button id="restart" hidden>もう一度乗る</button>
+        <p id="look-help">ドラッグで見回す</p>
+      </div>
     </div>
     <div id="ski-controls" hidden>
       <div class="ski-turns">
@@ -131,6 +134,14 @@
     </dialog>
   </main>
   <script type="module">
+    const controlsToggle = document.querySelector('#toggle-controls');
+    const rideControls = document.querySelector('#ride-controls');
+    controlsToggle.addEventListener('click', () => {
+      rideControls.hidden = !rideControls.hidden;
+      controlsToggle.setAttribute('aria-expanded', String(!rideControls.hidden));
+      controlsToggle.textContent = rideControls.hidden ? '操作パネルを開く' : 'パネルを最小化';
+    });
+
     const titleScreen = document.querySelector('#title-screen');
     const helpGuide = document.querySelector('#help-guide');
     document.querySelector('#show-help').addEventListener('click', () => helpGuide.showModal());
