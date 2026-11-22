@@ -4,7 +4,9 @@ import { liftExitPose, liftExitProgress, exitRunLength } from './resort.js';
 export function createRideCamera(canvas, gripView, config, { waitingDepth, waitingOffset, platformY, seatXs }) {
   const { quad, lower, upper, boarding, loadingStop, waitingAlong, unloading, summit, chairDrop,
     cableHeight, railDrop, glideSeconds } = config;
-  const camera = new THREE.PerspectiveCamera(67, 1, 0.07, 1650);
+  const verticalFov = 67;
+  const maxHorizontalFov = THREE.MathUtils.degToRad(100);
+  const camera = new THREE.PerspectiveCamera(verticalFov, 1, 0.07, 1650);
   camera.rotation.order = 'YXZ';
   const up = new THREE.Vector3(0, 1, 0);
 
@@ -113,7 +115,9 @@ export function createRideCamera(canvas, gripView, config, { waitingDepth, waiti
   }
 
   function resize(width, height) {
-    camera.aspect = width / Math.max(height, 1);
+    camera.aspect = width / height;
+    const cappedVerticalFov = 2 * Math.atan(Math.tan(maxHorizontalFov / 2) / camera.aspect);
+    camera.fov = Math.min(verticalFov, THREE.MathUtils.radToDeg(cappedVerticalFov));
     camera.updateProjectionMatrix();
   }
 
