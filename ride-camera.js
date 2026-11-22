@@ -1,17 +1,16 @@
 import * as THREE from './node_modules/three/build/three.module.js';
-import { quadExitPose, quadGlideLength } from './resort.js';
+import { liftExitPose, exitRunLength } from './resort.js';
 
 export function createRideCamera(canvas, gripView, config, { waitingDepth, waitingOffset, platformY, seatXs }) {
-  const { quad, lower, upper, boarding, loadingStop, waitingAlong, unloading, exitEnd, summit, chairDrop,
+  const { quad, lower, upper, boarding, loadingStop, waitingAlong, unloading, summit, chairDrop,
     cableHeight, railDrop, glideSeconds } = config;
-  const camera = new THREE.PerspectiveCamera(67, 1, 0.07, 980);
+  const camera = new THREE.PerspectiveCamera(67, 1, 0.07, 1650);
   camera.rotation.order = 'YXZ';
   const up = new THREE.Vector3(0, 1, 0);
 
   const waitingEye = new THREE.Vector3(lower.x + seatXs[quad ? 1 : 0] + waitingOffset, platformY + 1.58, -loadingStop + waitingDepth);
   const seatedEye = new THREE.Vector3();
   const pose = new THREE.Vector3();
-  const overlookYaw = -1.83;
   let lookYaw = 0;
   let lookPitch = 0;
   let dragPointer;
@@ -62,27 +61,16 @@ export function createRideCamera(canvas, gripView, config, { waitingDepth, waiti
       incline = -.14;
     } else if (phase === 'riding') {
       pose.set(waitingEye.x - waitingOffset, waitingEye.y, -loadingStop).lerp(seatedEye, sitProgress);
-    } else if (quad) {
-      const elapsed = glideElapsed;
-      const glide = THREE.MathUtils.smoothstep(elapsed, 0, glideSeconds);
-      const landing = THREE.MathUtils.smoothstep(elapsed, 0, 1.65);
-      const point = quadExitPose(glide * quadGlideLength);
-      pose.set(point.x + seatXs[1] * (1 - landing),
+      const openLine = THREE.MathUtils.smoothstep(Math.min(along - boarding, unloading - along), 15, 47);
+      incline = -.16 * openLine * sitProgress;
+    } else {
+      const glide = THREE.MathUtils.smoothstep(glideElapsed, 0, glideSeconds);
+      const landing = THREE.MathUtils.smoothstep(glideElapsed, 0, 1.25);
+      const point = liftExitPose(upper, summit, glide * exitRunLength);
+      pose.set(point.x + seatXs[quad ? 1 : 0] * (1 - landing),
         point.y + THREE.MathUtils.lerp(cableHeight - railDrop + 1.02 - chairDrop, 1.68, landing),
         -point.along);
-      heading = point.yaw * landing;
-      incline = -0.11 * landing;
-    } else {
-      const progress = THREE.MathUtils.smoothstep(along, unloading, exitEnd);
-      const exitOffset = Math.min(along - unloading, exitEnd - unloading);
-      pose.set(
-        upper.x + seatXs[0] * (1 - progress) + 2.25 * progress,
-        summit + THREE.MathUtils.lerp(cableHeight - railDrop + 1.02 - chairDrop, 1.68, progress)
-          + 0.045 * Math.sin(progress * 4 * Math.PI) * Math.sin(progress * Math.PI),
-        -unloading - 0.22 - exitOffset,
-      );
-      heading = overlookYaw * progress;
-      incline = -0.10 * progress;
+      incline = -.11 * landing;
     }
 
     return { position: pose, heading, incline };

@@ -1,44 +1,52 @@
-import { courses, places, terrainHeight } from './resort.js';
+import { courses, terrainHeight } from './resort.js';
 
-const points = [
-  [2.25, places.pairTop.along + 3.22],
-  [6.0, places.pairTop.along + 3.5],
-  ...courses[0].samples,
-];
-const lengthAt = [0];
-for (let i = 1; i < points.length; i++) {
-  const [x,a] = points[i];
-  const [px,pa] = points[i-1];
-  lengthAt.push(lengthAt[i-1] + Math.hypot(x-px,a-pa));
-}
-const length = lengthAt.at(-1);
 const limit = (value,min,max) => Math.max(min,Math.min(max,value));
 
-function sample(distance) {
-  const at = limit(distance, 0, length);
-  let low = 0, high = lengthAt.length-1;
-  while(high-low>1) {
-    const mid=(high+low)>>1;
-    if(lengthAt[mid]<=at) low=mid;
-    else high=mid;
-  }
-  const [x,a]=points[low];
-  const [nx,na]=points[high];
-  const t=(at-lengthAt[low])/(lengthAt[high]-lengthAt[low]);
-  return [x+(nx-x)*t,a+(na-a)*t];
-}
-
 export function createSkiRun() {
-  let distance=0, lateral=0, speed=0, steering=0;
-  const state={ running:false, arrived:false, speed:0, x:points[0][0], along:points[0][1], yaw:0, lean:0 };
+  let points, lengthAt, length, lateralLimit;
 
-  function begin() {
+  function selectCourse(index, midway) {
+    const course = courses[index];
+    points = midway && course.midwayRoute ? course.midwayRoute : course.route;
+    lengthAt = [0];
+    for (let i = 1; i < points.length; i++) {
+      const [x, along] = points[i];
+      const [previousX, previousAlong] = points[i - 1];
+      lengthAt.push(lengthAt[i - 1] + Math.hypot(x - previousX, along - previousAlong));
+    }
+    length = lengthAt.at(-1);
+    lateralLimit = Math.min(2.6, course.width * .36);
+  }
+
+  function sample(distance) {
+    const at = limit(distance, 0, length);
+    let low = 0, high = lengthAt.length-1;
+    while(high-low>1) {
+      const mid=(high+low)>>1;
+      if(lengthAt[mid]<=at) low=mid;
+      else high=mid;
+    }
+    const [x,a]=points[low];
+    const [nx,na]=points[high];
+    const t=(at-lengthAt[low])/(lengthAt[high]-lengthAt[low]);
+    return [x+(nx-x)*t,a+(na-a)*t];
+  }
+
+  let distance=0, lateral=0, speed=0, steering=0;
+  const state={ running:false, arrived:false, speed:0, x:0, along:0, yaw:0, lean:0 };
+
+  function begin(index = 0, midway = false) {
+    selectCourse(index, midway);
+    [state.x, state.along] = points[0];
+    state.speed = 0;
+    state.lean = 0;
     distance=0;
     lateral=0;
     speed=0;
     steering=0;
     state.arrived=false;
     state.running=true;
+    advance(0);
   }
 
   function advance(dt, {left=false,right=false,push=false,brake=false}={}) {
@@ -50,7 +58,7 @@ export function createSkiRun() {
     speed = limit(speed + (brake ? -7.1 : drive)*dt, 0, 12.5);
     distance = Math.min(length, distance+speed*dt);
     steering+=(Number(right)-Number(left)-steering)*Math.min(1,dt*7);
-    lateral=limit(lateral + steering*speed*.32*dt, -2.6,2.6);
+    lateral=limit(lateral + steering*speed*.32*dt, -lateralLimit,lateralLimit);
     const p=sample(distance);
     const q=sample(Math.min(length,distance+4));
     const r=distance>=length-4?sample(Math.max(0,distance-3)):p;

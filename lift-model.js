@@ -1,3 +1,4 @@
+import { mergeFixedMeshes } from './render-optimization.js';
 import * as THREE from './node_modules/three/build/three.module.js';
 
 const zinc = new THREE.MeshStandardMaterial({ color: 0x8399a2, roughness: 0.32, metalness: 0.48 });
@@ -178,6 +179,9 @@ export function createChairModel(quad, drop) {
     beam(chair, 0.17, 0.12, 0.32, fastener, 0, 0.075, 0.07);
     part(chair,new THREE.CylinderGeometry(0.08,0.08,0.22,14),zinc,0,0.08,0.08).rotation.z = Math.PI / 2;
   }
+  const groups = [];
+  chair.traverse(node => { if (node.isGroup) groups.push(node); });
+  for (const group of groups) mergeFixedMeshes(group, group.children);
   return chair;
 }
 

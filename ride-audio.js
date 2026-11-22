@@ -2,7 +2,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
   let engine, enabled=false, lastUpdate=-Infinity;
   let previousJointPhase = null;
   const announcements = new Map();
-  let loadingAnnouncements;
+  const loadingAnnouncements = new Set();
   const AudioEngine=window.AudioContext || window.webkitAudioContext;
   button.hidden=!AudioEngine;
 
@@ -56,13 +56,12 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       engine??=setup();
       await engine.context.resume();
       enabled=!enabled;
-      if (enabled && announcementFiles && !loadingAnnouncements) {
-        loadingAnnouncements = Promise.allSettled(Object.entries(announcementFiles).map(async ([name, url]) => {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error('Announcement could not be loaded: ' + name);
-          announcements.set(name, await engine.context.decodeAudioData(await response.arrayBuffer()));
-        }));
+      if (enabled && announcementFiles) {
+        for (const [name, url] of Object.entries(announcementFiles)) {
+          if (!announcements.has(name) && !loadingAnnouncements.has(name)) loadAnnouncement(name, url);
+        }
       }
+
       button.setAttribute('aria-pressed',String(enabled));
       button.textContent=enabled?'環境音を切る':'環境音を聴く';
       engine.master.gain.setTargetAtTime(enabled?.65:0,engine.context.currentTime,.07);
@@ -71,6 +70,19 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       button.textContent='環境音を再生できません';
     }
   });
+
+  async function loadAnnouncement(name, url) {
+    loadingAnnouncements.add(name);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(String(response.status));
+      announcements.set(name, await engine.context.decodeAudioData(await response.arrayBuffer()));
+    } catch (error) {
+      console.warn('案内放送を読み込めませんでした', name, error);
+    } finally {
+      loadingAnnouncements.delete(name);
+    }
+  }
 
   function update({zone,speed,quad,quiet,motorLevel,jointPhase}) {
     if(!engine||!enabled)return;

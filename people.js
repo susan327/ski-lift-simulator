@@ -36,21 +36,87 @@ function mesh(parent, geometry, material, x, y, z) {
 }
 
 const bodies = new WeakMap();
+const appearances = new WeakMap();
+const eyewearGeometry = new THREE.BoxGeometry(.177, .056, .041);
+const hairTailGeometry = new THREE.CapsuleGeometry(.036, .10, 3, 6);
+const helmetColors = [helmet, fabric(0xda765d), fabric(0x6b93ab), fabric(0xe4b85c), fabric(0x4a455c)];
+const lensColors = [goggles, fabric(0x359ab3), fabric(0xc67f3f), fabric(0x9274ad)];
+const hairColors = [fabric(0x2f2526), fabric(0x594139), fabric(0x94643d), fabric(0xc4a26b)];
+const skinColors = [skin, fabric(0xe1ae8b), fabric(0x9e634b), fabric(0x744732)];
 
-function skier(colorIndex, snowboard) {
+const profiles = [
+  {height:1, width:1, headwear:'helmet', helmet:0, lens:0, skin:0},
+  {height:.95, width:.91, headwear:'ponytail', helmet:1, hair:0, lens:1, skin:1},
+  {height:1.05, width:1.06, headwear:'short', hair:1, lens:2, skin:2},
+  {height:.73, width:.78, headwear:'helmet', helmet:3, lens:3, skin:1},
+  {height:.90, width:.92, headwear:'bob', hair:2, lens:null, skin:3},
+  {height:1.02, width:1.02, headwear:'helmet', helmet:2, lens:1, skin:2},
+  {height:.79, width:.82, headwear:'helmet', helmet:1, lens:2, skin:0},
+  {height:.94, width:.95, headwear:'braids', helmet:4, hair:3, lens:0, skin:1},
+  {height:1.01, width:1.03, headwear:'short', hair:0, lens:null, skin:3},
+];
+
+const headParts = new WeakMap();
+function buildHead(parent, y, z, size = 1) {
+  const head = new THREE.Group();
+  head.position.set(0, y, z);
+  head.scale.setScalar(size);
+  parent.add(head);
+  const face = mesh(head, headGeometry, skin, 0, 0, 0);
+  const cap = mesh(head, headGeometry, helmet, 0, .049, .023);
+  cap.scale.set(1.07,.96,1.04);
+  const hair = mesh(head, headGeometry, hairColors[0], 0, .045, .023);
+  const lens = mesh(head, eyewearGeometry, goggles, 0, .021, -.098);
+  const tails = [-1,1].map(side => mesh(head, hairTailGeometry, hairColors[0], side * .07, -.058, .071));
+  const eyes = [-1,1].map(side => {
+    const eye = mesh(head, headGeometry, goggles, side*.034, .018, -.097);
+    eye.scale.set(.08,.09,.05);
+    return eye;
+  });
+  headParts.set(parent, {face, cap, hair, lens, tails, eyes});
+}
+
+function applyHead(parent, profile) {
+  const {face, cap, hair, lens, tails, eyes} = headParts.get(parent);
+  const {headwear} = profile;
+  const hasHelmet = ['helmet', 'ponytail', 'braids'].includes(headwear);
+  face.material = skinColors[profile.skin];
+  cap.visible = hasHelmet;
+  cap.material = helmetColors[profile.helmet ?? 0];
+  hair.visible = !hasHelmet;
+  hair.material = hairColors[profile.hair ?? 0];
+  hair.scale.set(1.03, headwear === 'bob' ? 1.03 : .70, .98);
+  hair.position.y = headwear === 'bob' ? .020 : .060;
+  lens.visible = profile.lens !== null;
+  lens.material = lensColors[profile.lens ?? 0];
+  eyes.forEach(eye => { eye.visible = !lens.visible; });
+  tails.forEach((tail, i) => {
+    tail.visible = headwear === 'braids' || (i === 0 && headwear === 'ponytail');
+    tail.material = hair.material;
+    tail.position.x = headwear === 'ponytail' ? 0 : (i ? .071 : -.071);
+    tail.rotation.x = headwear === 'ponytail' ? -.37 : .16;
+  });
+}
+
+function appearance(index, snowboard) {
+  return { profile: profiles[index % profiles.length], jacket: jackets[index % jackets.length], snowboard };
+}
+
+function skier(colorIndex, snowboard, style = appearance(colorIndex, snowboard)) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   body.name = 'body';
   bodies.set(root, body);
   root.userData.snowboard = snowboard;
   if (snowboard) body.rotation.y = -Math.PI / 2;
+  const {jacket, profile} = style;
   root.add(body);
-  const jacket = jackets[colorIndex % jackets.length];
+  root.scale.set(profile.height * profile.width, profile.height, profile.height);
+  appearances.set(root, style);
   const torso = mesh(body,torsoGeometry,jacket,0,0.99,0);
   torso.scale.z = 0.76;
-  mesh(body,headGeometry,skin,0,1.29,-0.036);
-  mesh(body,headGeometry,helmet,0,1.34,0.004).scale.set(1.07,0.98,1.04);
-  mesh(body,new THREE.BoxGeometry(0.177,0.056,0.041),goggles,0,1.31,-0.104);
+  buildHead(body, 1.29, -.036);
+  applyHead(body, profile);
   for (const side of [-1,1]) {
     const x = side * 0.115;
     mesh(body,limbGeometry,pants,x,0.63,0.015).rotation.x = -0.37;
@@ -74,7 +140,7 @@ const legLength = .39;
 
 export function poseSitting(rider, progress, snowY = -Infinity, release = 1, quad = false) {
   const { legs, board } = seatedLegs.get(rider);
-  const snow = snowY - rider.position.y;
+  const snow = (snowY - rider.position.y) / rider.scale.y;
   const groundedAnkle = snow + .085;
   const extendedAnkle = quad ? THREE.MathUtils.lerp(-.69, -.59, progress) : -.69;
   const ankleY = Math.max(groundedAnkle, THREE.MathUtils.lerp(extendedAnkle, -.43, release));
@@ -107,14 +173,13 @@ function poseLegSegment(segment, y1, z1, y2, z2) {
   segment.scale.y = Math.hypot(y2 - y1, z2 - z1) / .36;
 }
 
-function seatedSkier(colorIndex) {
+function seatedSkier(colorIndex, style = appearance(colorIndex, false)) {
   const rider = new THREE.Group();
   const legs = [];
-  const jacket = jackets[colorIndex % jackets.length];
+  const {jacket} = style;
   mesh(rider,torsoGeometry,jacket,0,0.38,0.031).scale.set(.78,.9,.78);
   mesh(rider,new THREE.CylinderGeometry(.061,.069,.113,10),jacket,0,.642,-.008);
-  mesh(rider,headGeometry,helmet,0,0.754,-0.022).scale.setScalar(0.92);
-  mesh(rider,new THREE.BoxGeometry(0.142,0.043,0.037),goggles,0,0.738,-0.109);
+  buildHead(rider, .733, -.021, .92);
   for(const side of [-1,1]){
     const x=side*0.082;
     const thigh = mesh(rider,limbGeometry,pants,x,0.07,-0.173);
@@ -130,8 +195,20 @@ function seatedSkier(colorIndex) {
   board.rotation.y = Math.PI * 0.16;
   board.visible = false;
   seatedLegs.set(rider, { legs, board });
+  applySeatedAppearance(rider, style);
   poseSitting(rider, 1);
   return rider;
+}
+
+function applySeatedAppearance(rider, style) {
+  const {profile, jacket, snowboard} = style;
+  rider.scale.set(profile.height * profile.width, profile.height, profile.height);
+  applyHead(rider, profile);
+  for (const part of rider.children) {
+    if (jackets.includes(part.material)) part.material = jacket;
+    if (part.name === 'passenger-ski') part.visible = !snowboard;
+    if (part.name === 'passenger-board') part.visible = snowboard;
+  }
 }
 
 function createRoute(course) {
@@ -152,7 +229,7 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     const route = createRoute(course);
     const [count,speed,width] = routeSpecs[index];
     return Array.from({length:count},(_,i)=>{
-      const model = skier(i+index, i % 2 === 1);
+      const model = skier(i + index * 5, i % 2 === 1);
       model.name = 'ski-runner';
       scene.add(model);
       return {model,route,speed,width,offset:(i+0.41) / count + index*0.071,phase:i*2.17};
@@ -161,11 +238,10 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
 
   const { seatXs, quad, chairDrop } = station;
   const queue = seatXs.map((_, lane) => Array.from({ length: 3 }, (_, row) => {
-    const model = skier(lane + row * 2, lane % 2 === 1);
+    const model = skier(lane * 2 + row * 3 + (quad ? 0 : 1), (lane + row) % 2 === 1);
     model.name = 'lift-queue-skier';
     model.userData.lane = lane;
     const materials = new Map();
-    model.userData.jacket = bodies.get(model).children[0].material;
     model.traverse(part => {
       if (!part.isMesh) return;
       if (!materials.has(part.material)) materials.set(part.material, part.material.clone());
@@ -181,6 +257,17 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     passenger.userData.seat = lane;
     passenger.position.set(x, -chairDrop + .12, 0);
     chair.getObjectByName('chair-carrier').add(passenger);
+    return passenger;
+  }));
+
+  const distantTorso = new THREE.BoxGeometry(.31,.43,.24);
+  const distantHead = new THREE.SphereGeometry(.105, 6, 4);
+  const distantPassengers = station.simplifiedChairs.map(chair => seatXs.map(x => {
+    const passenger = new THREE.Group();
+    passenger.position.set(x, -chairDrop + .12, 0);
+    mesh(passenger, distantTorso, jackets[0], 0, .34, 0);
+    mesh(passenger, distantHead, goggles, 0, .65, 0);
+    chair.add(passenger);
     return passenger;
   }));
 
@@ -219,6 +306,7 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
   const laneSteps = seatXs.map(() => -Infinity);
   const seatStyles = chairs.map(() => seatXs.map(() => null));
   const reservedSeat = quad ? 1 : 0;
+  const queueStyles = new Map(queue.flat().map(person => [person.id, appearances.get(person)]));
 
   function advanceBoarding(distances, riderChair, travel) {
     const { start, boardingContact, loopLength } = station;
@@ -228,7 +316,7 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
         boardingChair = index;
         queue.forEach((lane, seat) => {
           if (index === riderChair && seat === reservedSeat) return;
-          seatStyles[index][seat] = lane[0];
+          seatStyles[index][seat] = lane[0].id;
           lane.push(lane.shift());
           laneSteps[seat] = travel;
         });
@@ -237,14 +325,28 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
     });
   }
 
-  function updateBoarding(distances, riderChair, playerRow, queueState, travel) {
+  function updateBoarding(distances, riderChair, playerRow, queueState, travel, detailedChairs) {
     const { start, boardingContact, unloading, loopLength, loadingStop, climbStart, x, waitingDepth, waitingOffset } = station;
     const platformYAlong = along => along <= loadingStop + 1.1 ? station.platformY : -Infinity;
     seated.forEach((seats, index) => {
       const along = start + THREE.MathUtils.euclideanModulo(distances[index], loopLength);
       seats.forEach((passenger, seat) => {
-        passenger.visible = along >= boardingContact && along <= unloading + 3 && !(index === riderChair && seat === reservedSeat);
-        const model = seatStyles[index][seat];
+        const occupied = along >= boardingContact && along <= unloading + 3 && !(index === riderChair && seat === reservedSeat);
+        const styleId = seatStyles[index][seat];
+        const style = queueStyles.get(styleId);
+        const distant = distantPassengers[index][seat];
+        distant.visible = occupied && !detailedChairs[index];
+        if (style && distant.visible) {
+          const {profile, jacket} = style;
+          distant.scale.set(profile.height * profile.width, profile.height, profile.height);
+          distant.children[0].material = jacket;
+          distant.children[1].material = helmetColors[profile.helmet] ?? hairColors[profile.hair ?? 0];
+        }
+        if (style && passenger.userData.styleId !== styleId) {
+          passenger.userData.styleId = styleId;
+          applySeatedAppearance(passenger, style);
+        }
+        passenger.visible = occupied && detailedChairs[index];
         if (passenger.visible) {
           const sit = index === boardingChair ? THREE.MathUtils.smoothstep(queueState.sinceContact, 0, .55) : 1;
           const contactDistance = along - boardingContact;
@@ -256,13 +358,6 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
           const releaseStart = quad ? loadingStop + 1.1 : climbStart;
           const release = THREE.MathUtils.smoothstep(along, releaseStart, releaseStart + 3);
           poseSitting(passenger, sit, snowY - chairs[index].position.y, release, quad);
-        }
-        if (!model || passenger.userData.styleId === model.id) return;
-        passenger.userData.styleId = model.id;
-        for (const part of passenger.children) {
-          if (jackets.includes(part.material)) part.material = model.userData.jacket;
-          if (part.name === 'passenger-ski') part.visible = !model.userData.snowboard;
-          if (part.name === 'passenger-board') part.visible = model.userData.snowboard;
         }
       });
     });
@@ -299,8 +394,9 @@ export function createPopulation(scene, courses, terrainHeight, chairs, station)
 }
 
 export function createPlayerModel(scene) {
-  const standing = skier(1, false);
-  const seated = seatedSkier(1);
+  const style = appearance(5, false);
+  const standing = skier(5, false, style);
+  const seated = seatedSkier(5, style);
   standing.name = 'player-standing';
   seated.name = 'player-seated';
   scene.add(standing, seated);

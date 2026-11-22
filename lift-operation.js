@@ -1,4 +1,4 @@
-import { places, liftGround, quadLiftGround, quadLine, pairLine } from './resort.js';
+import { places, liftGround, quadLiftGround, quadLine, pairLine, upperPairLine, upperPairGround } from './resort.js';
 import { createLiftMotion } from './lift-motion.js';
 
 const lerp = (a,b,t) => (1 - t) * a + t * b;
@@ -8,9 +8,9 @@ function smoothstep(value,min,max) {
   return t*t*(3-2*t);
 }
 
-export function createLiftOperations(quad) {
-  const lower = quad ? places.quadBase : places.pairBase;
-  const upper = quad ? places.quadTop : places.pairTop;
+export function createLiftOperations(quad, upperPair = false) {
+  const lower = quad ? places.quadBase : upperPair ? places.pairUpperBase : places.pairBase;
+  const upper = quad ? places.quadTop : upperPair ? places.pairUpperTop : places.pairTop;
   const boarding = lower.along;
   const loadingStop = boarding + .14;
   // The leading armrest projects 0.38 m ahead of the chair anchor.
@@ -18,13 +18,12 @@ export function createLiftOperations(quad) {
   const boardingContact = loadingStop - .38;
   const unloading = upper.along;
   const start = boarding - 10;
-  const waitingAlong = start - 1.5;
+  // The straight quad queue starts behind the entire return-wheel sweep.
+  const waitingAlong = start - (quad ? 5.5 : 1.5);
   const boardingApproachSeconds = 8;
   const signalAlong = waitingAlong + 2;
   const end = unloading + 10;
-  const climbStart = quad ? quadLine.climbStart : pairLine.climbStart;
-  const climbEnd = quad ? quadLine.climbEnd : pairLine.climbEnd;
-  const exitEnd = unloading + 3;
+  const { climbStart, climbEnd } = quad ? quadLine : upperPair ? upperPairLine : pairLine;
   const mainSpeed = quad ? 5 : 2.4;
   const stationSpeed = quad ? 1.0 : mainSpeed;
   const cableHeight = quad ? 5.1 : 4.4;
@@ -35,14 +34,51 @@ export function createLiftOperations(quad) {
   const loopLength = 2 * (lineLength + turnLength);
   const baseTurn = 2 * lineLength + turnLength;
   const railDrop = quad ? 0.36 : 0;
-  const glideSeconds = 5.6;
+  const glideSeconds = 7.2;
 
-  function lineX(along) {
-    const t = smoothstep(along, climbStart, climbEnd);
-    return lerp(lower.x, upper.x, t);
+  const trackGround = quad ? quadLiftGround : upperPair ? upperPairGround : liftGround;
+  const terminalReach = quad ? 32 : upperPair ? 20 : 19;
+  const firstTower = boarding + terminalReach;
+  const lastTower = unloading - terminalReach;
+  const spans = Math.ceil((lastTower - firstTower) / (quad ? 52 : 38));
+  const towerPositions = Array.from({length: spans + 1}, (_, i) => lerp(firstTower, lastTower, i / spans));
+  const supports = [start, ...towerPositions, end].map((along, index, points) => {
+    if (index <= 1 || index >= points.length - 2) {
+      const atBase = index <= 1;
+      return { along, x: atBase ? lower.x : upper.x,
+        y: trackGround(atBase ? boarding : unloading) + cableHeight };
+    }
+    const cross = smoothstep(along, climbStart, climbEnd);
+    const terminal = quad ? 31 : 11;
+    const transition = quad ? 62 : 35;
+    const rise = quad ? 13 : upperPair ? 11 : 8;
+    const distanceFromStation = Math.min(along - boarding, unloading - along);
+    const clearance = rise * smoothstep(distanceFromStation, terminal, terminal + transition);
+    return { along, x: lerp(lower.x, upper.x, cross), y: trackGround(along) + cableHeight + clearance };
+  });
+
+  function spanAt(along) {
+    const index = supports.findIndex((support, i) => i > 0 && along <= support.along);
+    return index < 0 ? supports.length - 1 : index;
   }
 
-  const trackGround = quad ? quadLiftGround : liftGround;
+  function lineX(along) {
+    const index = spanAt(along);
+    const from = supports[index - 1], to = supports[index];
+    const t = Math.max(0, Math.min(1, (along - from.along) / (to.along - from.along)));
+    return lerp(from.x, to.x, t);
+  }
+
+  function ropeYAt(along) {
+    const index = spanAt(along);
+    const from = supports[index - 1], to = supports[index];
+    const length = to.along - from.along;
+    const t = Math.max(0, Math.min(1, (along - from.along) / length));
+    // End spans share the terminal's level conveyor. Free spans sag below their support chord.
+    if (index === 1 || index === supports.length - 1) return from.y;
+    const sag = Math.min(.45, length ** 2 * .00016);
+    return lerp(from.y, to.y, t) - 4 * sag * t * (1 - t);
+  }
   const summit = trackGround(unloading);
 
   function terminalWeight(distance) {
@@ -80,19 +116,16 @@ export function createLiftOperations(quad) {
     return 0.14 * smoothstep(handoffDistance(distance), handoff.clamped, handoff.railEnd);
   }
 
-  const towerPositions = quad ? [-264, -210, -153, -95, -35, 26, 90, 151, 213, 269, 321]
-    : [35, 75, 116, 159, 203, 246];
-
-  const announcementPoints = quad ? { approaching: towerPositions.at(-1), unloading: unloading - 6 } : null;
+  const announcementPoints = quad ? { approaching: towerPositions.at(-3), unloading: unloading - 6 } : null;
   const motion = createLiftMotion(loopLength, speedAt);
-  const chairCount = Math.max(1, Math.round(motion.duration / 13));
-  const quadUnloadTime = motion.secondsAt(unloading - start);
+  const chairCount = Math.max(1, Math.round(motion.duration / (quad ? 16 : 13)));
+  const unloadTime = motion.secondsAt(unloading - start);
 
   function liftPose(distance, position) {
     const d = modulo(distance, loopLength);
     if (d <= lineLength) {
       const along = start + d;
-      position.set(lineX(along), trackGround(along) + cableHeight, -along);
+      position.set(lineX(along), ropeYAt(along), -along);
       return -Math.atan2(lineX(along + 0.1) - lineX(along - 0.1), 0.2);
     }
     if (d < lineLength + turnLength) {
@@ -102,7 +135,7 @@ export function createLiftOperations(quad) {
     }
     if (d <= 2 * lineLength + turnLength) {
       const along = end - (d - lineLength - turnLength);
-      position.set(lineX(along) - 2 * wheelRadius, trackGround(along) + cableHeight, -along);
+      position.set(lineX(along) - 2 * wheelRadius, ropeYAt(along), -along);
       return Math.PI - Math.atan2(lineX(along + 0.1) - lineX(along - 0.1), 0.2);
     }
     const angle = (d - 2 * lineLength - turnLength) / wheelRadius;
@@ -114,7 +147,7 @@ export function createLiftOperations(quad) {
     if (elapsed < boardingTime) return 'waiting';
     if (elapsed < loadTime) return 'boarding';
     if (along < unloading) return 'riding';
-    if (quad ? elapsed < quadUnloadTime + glideSeconds : along < exitEnd) return 'unloading';
+    if (elapsed < unloadTime + glideSeconds) return 'unloading';
     return 'arrived';
   }
 
@@ -184,7 +217,7 @@ export function createLiftOperations(quad) {
   const seatSpacing = motion.duration / chairCount;
   const loadTime = motion.secondsAt(boardingContact - start);
   // The quad's next group starts from the rear while the preceding group seats.
-  const clearanceTime = quad ? -1.5 : motion.secondsAt(loadingStop + 1.36 - start) - loadTime;
+  const clearanceTime = quad ? -5 : motion.secondsAt(loadingStop + 1.36 - start) - loadTime;
   const boardingTime = loadTime - seatSpacing + clearanceTime;
 
   function boardingQueueAt(travel) {
@@ -219,7 +252,7 @@ export function createLiftOperations(quad) {
       ? 1 - smoothstep(timePastPreviousChair, 0, .8) : 0;
     state.riderDistance = motion.distanceAt(rideTime);
     state.along = start + state.riderDistance;
-    state.glideElapsed = rideTime - quadUnloadTime;
+    state.glideElapsed = rideTime - unloadTime;
     if (state.phase !== 'finished') state.phase = stageAt(state.along, rideTime);
   }
 
@@ -245,9 +278,9 @@ export function createLiftOperations(quad) {
     if (state.phase === 'arrived') state.phase = 'finished';
   }
 
-  const config = { quad, lower, upper, boarding, loadingStop, boardingContact, waitingAlong, signalAlong, unloading, start, end, climbStart, climbEnd,
-    exitEnd, mainSpeed, stationSpeed, cableHeight, chairDrop, chairCount, wheelRadius, lineLength, turnLength,
+  const config = { quad, upperPair, lower, upper, boarding, loadingStop, boardingContact, waitingAlong, signalAlong, unloading, start, end, climbStart, climbEnd,
+    mainSpeed, stationSpeed, cableHeight, chairDrop, chairCount, wheelRadius, lineLength, turnLength,
     loopLength, baseTurn, railDrop, glideSeconds, summit, handoff, towerPositions, announcementPoints };
-  return { config, state, chairDistances, lineX, trackGround, liftPose, speedAt, mechanicsAt,
+  return { config, state, chairDistances, lineX, trackGround, ropeYAt, liftPose, speedAt, mechanicsAt,
     handoffDistance, railSupport, railFall, gripOpen, terminalModeAt, carrierMotionAt, towerBetween, boardingQueueAt, begin, advance, finishRide };
 }

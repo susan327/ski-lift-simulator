@@ -10,7 +10,7 @@
 </head>
 <body>
   <main>
-    <canvas id="view" aria-label="ペアリフトから見えるゲレンデ"></canvas>
+    <canvas id="view" aria-label="リフトとゲレンデの3D表示"></canvas>
     <header>
       <h1>ゲレンデリフト</h1>
       <p id="status" role="status">読み込み中</p>
@@ -19,7 +19,8 @@
     <div class="controls">
       <label>リフト
         <select id="lift-choice">
-          <option value="pair">ペア</option>
+          <option value="pair">第1ペア</option>
+          <option value="pair2">第2ペア</option>
           <option value="quad">クワッド</option>
         </select>
       </label>
@@ -40,7 +41,9 @@
       <button id="view-mode" type="button" aria-pressed="false">三人称視点</button>
       <button id="grip-view" type="button" aria-pressed="false" hidden>握索機を見る</button>
       <button id="ambient" type="button" aria-pressed="false">環境音を聴く</button>
-      <button id="start-ski" type="button" hidden>こもれび林間を滑る</button>
+      <label id="course-picker" hidden>滑走コース <select id="ski-course"></select></label>
+      <button id="start-ski" type="button" hidden>選んだコースを滑る</button>
+      <button id="pair-transfer" type="button" hidden>第2ペアへ乗り継ぐ</button>
       <button id="ski-return" type="button" hidden>麓の乗り場へ</button>
       <button id="finish" hidden>体験を終える</button>
       <button id="restart" hidden>もう一度乗る</button>

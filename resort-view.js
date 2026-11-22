@@ -1,15 +1,16 @@
+import { addVillageScenery } from './village-scenery.js';
 import * as THREE from './node_modules/three/build/three.module.js';
-import { courses, places, terrainHeight, nearCourse, quadLine, slopeAlong, slopeWidthScale } from './resort.js';
+import { courses, places, terrainHeight, nearCourse, nearLift, quadLine, slopeAlong, slopeWidthScale, stretchAlong } from './resort.js';
 import { createBatches, addTerrainTiles } from './render-optimization.js';
 
 const snowColor = new THREE.Color(0xecf6fc);
 
 export function addResortTerrain(scene) {
-  const terrainColumns = 240;
-  const terrainRows = 490;
-  const terrain = new THREE.PlaneGeometry(360, 820, terrainColumns, terrainRows);
+  const terrainColumns = 320;
+  const terrainRows = 784;
+  const terrain = new THREE.PlaneGeometry(480, 1470, terrainColumns, terrainRows);
   terrain.rotateX(-Math.PI / 2);
-  terrain.translate(35, 0, -30);
+  terrain.translate(35, 0, -340);
   const vertices = terrain.attributes.position;
   const colors = [];
   const tint = new THREE.Color();
@@ -26,7 +27,7 @@ export function addResortTerrain(scene) {
   }
   terrain.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   terrain.computeVertexNormals();
-  addTerrainTiles(scene, terrain, new THREE.MeshStandardMaterial({ vertexColors: true }), terrainColumns, terrainRows);
+  return addTerrainTiles(scene, terrain, new THREE.MeshStandardMaterial({ vertexColors: true }), terrainColumns, terrainRows);
 }
 
 export function addResortScenery(scene, { mesh, box, material, steel }) {
@@ -35,7 +36,9 @@ export function addResortScenery(scene, { mesh, box, material, steel }) {
   const bark = material(0x51463d);
   const trailMarkers = new Map(courses.map(course => [course.level, material(course.color)]));
 
-  for (const course of courses) {
+  const trails = courses.flatMap(course => course.midwaySamples
+    ? [course, { ...course, samples: course.midwaySamples }] : [course]);
+  for (const course of trails) {
     const trailVertices = [];
     const trailIndices = [];
     const surface = material(0xd9e9f1);
@@ -87,8 +90,9 @@ export function addResortScenery(scene, { mesh, box, material, steel }) {
   const signTexture = new THREE.CanvasTexture(signCanvas);
   signTexture.colorSpace = THREE.SRGBColorSpace;
   const trailSign = new THREE.Group();
-  const signAlong = places.pairTop.along + 3;
-  trailSign.position.set(7.6, terrainHeight(7.6, signAlong), -signAlong);
+  const signAlong = places.pairTop.along + 21;
+  const signX = places.pairTop.x + 9.5;
+  trailSign.position.set(signX, terrainHeight(signX, signAlong), -signAlong);
   trailSign.rotation.y = -Math.PI / 2;
   scene.add(trailSign);
   for (const x of [-0.53, 0.53]) {
@@ -104,6 +108,7 @@ export function addResortScenery(scene, { mesh, box, material, steel }) {
   const treePose = new THREE.Object3D();
   const treePart = new THREE.Object3D();
   function plantTree(x, along, scale) {
+    if (nearLift(x, along)) return;
     treePose.position.set(x, terrainHeight(x, along), -along);
     treePose.scale.setScalar(scale);
     treePose.rotation.y = along * .5 + x;
@@ -129,50 +134,60 @@ export function addResortScenery(scene, { mesh, box, material, steel }) {
   for (let row = 0; row < 11; row++) {
     for (const side of [-1, 1]) {
       for (let col = 0; col < 3; col++) {
-        const along = slopeAlong(8 + row * 3.8 + Math.sin(row + col) * 1.4);
+        const along = stretchAlong(slopeAlong(8 + row * 3.8 + Math.sin(row + col) * 1.4));
         const x = side * (3.4 + col * 3.15 + Math.cos(row * 2 + col) * 0.55 + (side < 0 ? 4 : 0));
         const scale = 0.92 + ((row + col * 2) % 5) * 0.14;
         if (!nearCourse(x, along, 1.8)) plantTree(x, along, scale);
       }
     }
   }
-  plantTree(-8, slopeAlong(53), 0.85);
-  plantTree(5.6, slopeAlong(54), 0.75);
+  plantTree(-8, stretchAlong(slopeAlong(53)), 0.85);
+  plantTree(5.6, stretchAlong(slopeAlong(54)), 0.75);
 
   for (let row = 0; row < 12; row++) {
     for (let col = 0; col < 10; col++) {
-      const along = slopeAlong(7 + row * 7.5 + Math.sin(col * 1.7 + row) * 2);
+      const along = stretchAlong(slopeAlong(7 + row * 7.5 + Math.sin(col * 1.7 + row) * 2));
       const x = (14 + col * 5.8 + Math.cos(row * 1.7 + col) * 2) * slopeWidthScale;
       const scale = 0.82 + ((col * 7 + row * 3) % 6) * 0.12;
       const quadX = THREE.MathUtils.lerp(places.quadBase.x, places.quadTop.x,
         THREE.MathUtils.smoothstep(along, quadLine.climbStart, quadLine.climbEnd));
       const clearOfLift = x < quadX - 8.7 || x > quadX + 3.1;
-      if (along < slopeAlong(86) && clearOfLift && !nearCourse(x, along, 2.05)) plantTree(x, along, scale);
+      if (along < stretchAlong(slopeAlong(86)) && clearOfLift && !nearCourse(x, along, 2.05)) plantTree(x, along, scale);
     }
   }
 
+  // Small stands frame the lower quad ascent with open views back to the plaza.
+  for (const center of [-260, -208, -135, -58]) {
+    for (let i = 0; i < 12; i++) {
+      const along = stretchAlong(center + i * 1.65);
+      const x = places.quadBase.x + (i % 2 ? 10 : -15) + Math.sin(i * 1.4) * 2;
+      if (!nearCourse(x, along, 2)) plantTree(x, along, 1.1 + (i % 4) * .17);
+    }
+  }
+  // The broken treeline beyond the village forms the nearer eastern ridge.
+  for (let i = 0; i < 140; i++) {
+    const along = stretchAlong(68 + i * 1.7);
+    const x = 202 + 7 * Math.sin(i * .075) + 2 * Math.cos(i);
+    plantTree(x, along, 1.3 + (i % 5) * .16);
+  }
+  // Preserve openings along the winding western trail and its mid-mountain connector.
+  for (let row = 0; row < 28; row++) {
+    for (let col = 0; col < 12; col++) {
+      const along = stretchAlong(-245 + row * 22 + 6 * Math.sin(col + row));
+      const x = -175 + col * 15 + 4 * Math.cos(row * 1.5 + col);
+      if (!nearCourse(x, along, 2.8)) plantTree(x, along, .92 + (row + col) % 5 * .14);
+    }
+  }
   treeBatches.build();
 
-  const lodge = new THREE.Group();
-  const timber = material(0x795242);
-  const roof = material(0x274d58);
-  const glass = material(0x78aebf);
-  lodge.position.set(places.base.x, terrainHeight(places.base.x, places.base.along), -places.base.along);
-  scene.add(lodge);
-  box(7.5, 2.8, 5.2, timber, 0, 1.4, 0, lodge);
-  for (const side of [-1, 1]) {
-    const panel = box(4.5, 0.20, 5.8, roof, side * 1.95, 3.48, 0, lodge);
-    panel.rotation.z = -side * 0.32;
-    box(1.65, 1.08, 0.06, glass, side * 2.3, 1.53, -2.62, lodge);
-  }
-  box(1.0, 2.05, 0.09, steel, 0, 1.04, -2.63, lodge);
-  box(0.34, 1.15, 0.36, steel, 2.35, 3.96, 0.74, lodge);
+  addVillageScenery(scene, material);
 
   const distantSnow = new THREE.MeshStandardMaterial({vertexColors:true,roughness:1});
   const ridgeShape = new THREE.PlaneGeometry(116, 64, 56, 30);
   ridgeShape.rotateX(-Math.PI / 2);
   const peakTint = new THREE.Color();
   for (const [x, along, height, rotation, seed] of [
+    [-85, -64, 60, -.54, 12], [12, -113, 78, .16, 7], [80, -103, 61, -.22, 3],
     [-43, 132, 57, 0.22, 2], [35, 171, 86, -0.31, 6], [93, 143, 64, 0.30, 5],
     [155, 112, 79, 0.66, 8], [179, 35, 57, 0.95, 4], [238, 73, 92, 0.57, 10],
   ]) {
@@ -192,7 +207,7 @@ export function addResortScenery(scene, { mesh, box, material, steel }) {
     }
     geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
-    const range = mesh(geometry,distantSnow,x * 2.55,-1,-slopeAlong(along));
+    const range = mesh(geometry,distantSnow,x * 2.55,-1,-stretchAlong(slopeAlong(along)));
     range.scale.set(2.6,2.0,2.5);
     range.rotation.y=rotation;
   }

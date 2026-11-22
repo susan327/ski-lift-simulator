@@ -1,7 +1,6 @@
 export const resortName = '雪明かり高原';
 
 export const slopeWidthScale = 1.65;
-const elevationScale = 1.6;
 const lowerLengthScale = 305 / 65;
 const upperLengthScale = 87 / 30;
 
@@ -11,40 +10,51 @@ export function slopeAlong(original) {
   return 288 + (original - 72) * upperLengthScale;
 }
 
-function originalAlong(along) {
-  if (along < 0) return along / lowerLengthScale;
-  if (along <= 288) return along / 4;
-  return 72 + (along - 288) / upperLengthScale;
+// Stretch the lift zones independently so the short transfer remains walkable.
+export function stretchAlong(along) {
+  if (along < -305) return along;
+  if (along <= 150) return -305 + (along + 305) * 820 / 455;
+  if (along <= 176) return 515 + along - 150;
+  return 541 + (along - 176) * 440 / 194;
+}
+
+function stretchBeginner(along) {
+  return -288 + (along + 288) * 300 / 153;
 }
 
 export const places = {
-  base: { name: 'ベースロッジ', x: 9, along: -8 },
-  pairBase: { name: 'ペア麓駅', x: 0, along: 0 },
-  pairTop: { name: 'ペア山頂', x: 0, along: slopeAlong(72) },
-  quadBase: { name: 'クワッド麓駅', x: 46 * slopeWidthScale, along: slopeAlong(-65) },
-  quadTop: { name: 'クワッド山頂', x: 53 * slopeWidthScale, along: slopeAlong(102) },
+  base: { name: 'ベースロッジ', x: 124, along: -302 },
+  pairBase: { name: '第1ペア麓駅', x: 117, along: -288 },
+  pairTop: { name: '第1ペア上駅', x: 158, along: 12 },
+  pairUpperBase: { name: '第2ペア中腹駅', x: 75, along: 541 },
+  pairUpperTop: { name: '第2ペア山頂駅', x: -13, along: 981 },
+  quadBase: { name: 'クワッド麓駅', x: 67, along: -305 },
+  quadTop: { name: 'クワッド中腹駅', x: 84, along: 515 },
 };
 
 export const courses = [
   {
-    name: 'こもれび林間', level: '初級', color: '#227451', width: 5,
-    description: 'ペア山頂から針葉樹の林を回り、麓のロッジ前へ。',
-    points: [[8, 74], [15, 68], [23, 58], [22, 48], [13, 40], [12, 31], [21, 22], [19, 12], [12, 5], [9, 0]],
+    name: 'ひだまりゲレンデ', level: '初級', color: '#428044', width: 9,
+    description: '第1ペア上駅から索の下を横切り、麓へ戻る緩斜面。',
+    points: [[161,-131],[208,-157],[182,-185],[139,-207],[87,-230],[84,-260],[99,-287]],
   },
   {
-    name: '水鏡バーン', level: '中級', color: '#305fa5', width: 12,
-    description: '東の稜線から正面の広い斜面を下り、林間コースと麓で合流。',
-    points: [[48, 96], [43, 88], [36, 75], [37, 61], [35, 48], [31, 35], [28, 22], [25, 12], [12, 5]],
+    name: '水鏡バーン', level: '中級', color: '#305fa5', width: 13,
+    description: 'クワッド中腹駅から山腹を回り、風切り尾根と合流して麓へ。',
+    points: [[111,145],[152,132],[125,84],[139,31],[79,-20],[38,-65],[-19,-130],[-37,-197],[37,-252],[48,-300]],
   },
   {
-    name: '風切り尾根', level: '上級', color: '#712d4d', width: 5,
-    description: '東の稜線から急な斜面を抜け、中腹で水鏡バーンに合流。',
-    points: [[59.06, 98.90], [61, 93], [64, 81], [58, 70], [48, 62], [37, 61]],
+    name: '風切り尾根', level: '上級', color: '#712d4d', width: 8,
+    description: '第2ペア山頂駅から東側の尾根を滑り、水鏡バーンに合流。そのまま共通ルートで麓へ。',
+    points: [[-6,371],[72,354],[110,322],[151,287],[183,243],[162,189],[137,141],[125,84]],
+    joins: { course: 1, point: 2 },
   },
   {
-    name: '白樺トラバース', level: '連絡', color: '#87530d', width: 4,
-    description: '水鏡バーンの中腹からリフトの西側を通り、クワッド麓駅の手前へ。',
-    points: [[35, 48], [36, 42], [34, 33], [35, 22], [33, 11], [35, 1], [37, -17], [35, -37], [37, -55], [38, -64]],
+    name: 'こもれび林間', level: '林間', color: '#227451', width: 8,
+    description: '山頂から左手の林を蛇行して麓へ。クワッド中腹駅からも途中合流できる。',
+    points: [[-20,368],[-113,333],[-148,285],[-53,244],[-15,198],[-110,153],[-154,99],[-65,52],[-8,13],[-109,-55],[-157,-111],[-81,-158],[18,-191],[14,-220],[37,-252],[48,-300]],
+    midway: [[78,151],[60,126],[36,93],[15,53],[-8,13]],
+    joins: { course: 1, point: 8, from: 14 },
   },
 ];
 
@@ -71,14 +81,39 @@ function sampleCourse(points) {
 }
 
 for (const course of courses) {
-  course.points = course.points.map(([x, along]) => [x * slopeWidthScale, slopeAlong(along)]);
-  course.width *= 1.5;
+  const transform = course === courses[0] ? stretchBeginner : stretchAlong;
+  course.points = course.points.map(([x, along]) => [x, transform(along)]);
+  if (course.midway) course.midway = course.midway.map(([x, along]) => [x, transform(along)]);
   course.samples = sampleCourse(course.points);
 }
+for (const course of courses) {
+  if (!course.joins) {
+    course.route = course.samples;
+    continue;
+  }
+  const { course: targetIndex, point, from } = course.joins;
+  const target = courses[targetIndex];
+  const join = target.points[point];
+  const sharedStart = target.samples.findIndex(([x, along]) => x === join[0] && along === join[1]);
+  // Sample through the junction with the same outgoing tangent, then use the actual shared trail.
+  const approach = course.points.slice(0, from ?? course.points.length - 1);
+  const approachSamples = sampleCourse([...approach, join, target.points[point + 1]]);
+  const split = approachSamples.findIndex(([x, along]) => x === join[0] && along === join[1]);
+  course.samples = approachSamples.slice(0, split + 1);
+  course.route = [...course.samples.slice(0, -1), ...target.samples.slice(sharedStart)];
+  if (course.midway) {
+    const [x, along] = course.midway.at(-1);
+    const entry = course.route.findIndex(([px, pa]) => px === x && pa === along);
+    const connector = sampleCourse([...course.midway, course.points[9]]);
+    const end = connector.findIndex(([px, pa]) => px === x && pa === along);
+    course.midwaySamples = connector.slice(0, end + 1);
+    course.midwayRoute = [...connector.slice(0, end), ...course.route.slice(entry)];
+  }
+}
 
-export function terminalNetFront(quad, summit) {
-  const station = summit ? (quad ? places.quadTop : places.pairTop)
-    : (quad ? places.quadBase : places.pairBase);
+export function terminalNetFront(quad, summit, upperPair = false) {
+  const station = summit ? (quad ? places.quadTop : upperPair ? places.pairUpperTop : places.pairTop)
+    : (quad ? places.quadBase : upperPair ? places.pairUpperBase : places.pairBase);
   return station.along + (summit ? -24 : 45);
 }
 
@@ -87,150 +122,99 @@ function smoothstep(value, min, max) {
   return t * t * (3 - 2 * t);
 }
 
-function originalLiftGround(along) {
-  return 21 * Math.max(0, Math.min(1, (along - 5) / 60));
-}
+export const pairLine = { climbStart: places.pairBase.along + 19, climbEnd: places.pairTop.along - 19 };
+export const upperPairLine = { climbStart: places.pairUpperBase.along + 20, climbEnd: places.pairUpperTop.along - 21 };
+const quadBaseFloor = .36;
+const quadSummitFloor = 76;
+const summitFloor = 148;
 
-export const pairLine = { climbStart: slopeAlong(5), climbEnd: slopeAlong(65) };
+function easedLiftGround(along, line, lower, upper, ease) {
+  const length = line.climbEnd - line.climbStart;
+  const d = Math.max(0, Math.min(length, along - line.climbStart));
+  const ramp = t => ease * (t ** 3 - .5 * t ** 4);
+  const rise = d < ease ? ramp(d / ease)
+    : d > length - ease ? length - ease - ramp((length - d) / ease) : d - ease / 2;
+  return lower + (upper - lower) * rise / (length - ease);
+}
 
 export function liftGround(along) {
-  return elevationScale * originalLiftGround(originalAlong(along));
+  return easedLiftGround(along, pairLine, 0, 23, 35);
 }
 
-const quadBaseFloor = 0.36;
-const quadSummitFloor = 55.8 * elevationScale;
-const apronPoints = [[53, 102.22], [54.5, 104.2], [56.8, 105.7], [59.6, 105.9], [62.3, 105.0], [64.7, 103.4], [66.1, 100.8], [66.0, 97.4], [64.2, 94.6], [63, 93]];
-export const quadExitPath = sampleCourse(apronPoints.map(([x, along]) => [
-  places.quadTop.x + x - 53, places.quadTop.along + along - 102,
-]));
-const exitLengths = [0];
-for (let i = 1; i < quadExitPath.length; i++) {
-  const [x, along] = quadExitPath[i];
-  const [px, pa] = quadExitPath[i - 1];
-  exitLengths.push(exitLengths[i - 1] + Math.hypot(x - px, along - pa));
-}
-export const quadExitLength = exitLengths.at(-1);
-export const quadGlideLength = exitLengths[quadExitPath.findIndex(([x]) => x >= places.quadTop.x + 11.7)];
-
-function exitHeight(distance) {
-  return quadSummitFloor - Math.max(0, distance - 2.4) * 0.105;
+export function upperPairGround(along) {
+  return easedLiftGround(along, upperPairLine, quadSummitFloor, summitFloor, 50);
 }
 
-export function quadExitPose(distance) {
-  const progress = Math.max(0, Math.min(distance, quadExitLength));
-  const i = exitLengths.findIndex((length, index) => index > 0 && length >= progress);
-  const t = (progress - exitLengths[i - 1]) / (exitLengths[i] - exitLengths[i - 1]);
-  const [x, along] = quadExitPath[i - 1];
-  const [nx, na] = quadExitPath[i];
-  return { x: x + (nx - x) * t, along: along + (na - along) * t, y: exitHeight(progress),
-    yaw: Math.atan2(x - nx, na - along) };
+export const exitRunLength = 18;
+const exitGrade = .085;
+const exitDrop = progress => exitGrade
+  * (Math.max(0, progress - 1.6) - Math.max(0, progress - 12));
+
+export function liftExitPose(upper, floor, distance) {
+  const progress = Math.max(0, Math.min(distance, exitRunLength));
+  return {
+    x: upper.x + 1.55 * smoothstep(progress, 6, 14),
+    along: upper.along + .22 + progress,
+    y: floor - exitDrop(progress),
+  };
 }
 
 export const quadLine = {
   climbStart: places.quadBase.along + 32,
   climbEnd: places.quadTop.along - 32,
-  easing: 72,
+  easing: 120,
 };
 
 export function quadLiftGround(along) {
-  const start = quadLine.climbStart;
-  const end = quadLine.climbEnd;
-  const ease = quadLine.easing;
-  const length = end - start;
-  const d = Math.max(0, Math.min(length, along - start));
-  // Integral of smoothstep gives a continuous slope into and out of the stations.
-  const rampIntegral = t => ease * (t ** 3 - 0.5 * t ** 4);
-  const rise = d < ease ? rampIntegral(d / ease)
-    : d > length - ease ? length - ease - rampIntegral((length - d) / ease)
-      : d - ease / 2;
-  return quadBaseFloor + (quadSummitFloor - quadBaseFloor) * rise / (length - ease);
+  return easedLiftGround(along, quadLine, quadBaseFloor, quadSummitFloor, quadLine.easing);
 }
 
-function shapeQuadApron(x, along, original) {
-  const localX = x - places.quadTop.x;
-  const localAlong = along - places.quadTop.along;
-  const platform = (1 - smoothstep(Math.abs(localX), 3.3, 13.0))
-    * (1 - smoothstep(Math.abs(localAlong - 3), 3.7, 16.0));
-  let y = original + (quadSummitFloor - original) * platform;
-  if (localX < -4 || localX > 19 || localAlong < -13 || localAlong > 9) return y;
-
-  let nearest = Infinity;
-  let progress = 0;
-  for (let i = 1; i < quadExitPath.length; i++) {
-    const [px, pa] = quadExitPath[i - 1];
-    const [nx, na] = quadExitPath[i];
-    const dx = nx - px;
-    const da = na - pa;
-    const t = Math.max(0, Math.min(1, ((x - px) * dx + (along - pa) * da) / (dx * dx + da * da)));
-    const distance = Math.hypot(x - px - dx * t, along - pa - da * t);
-    if (distance < nearest) {
-      nearest = distance;
-      progress = exitLengths[i - 1] + (exitLengths[i] - exitLengths[i - 1]) * t;
-    }
-  }
-  const merge = smoothstep(progress, quadGlideLength + 1, quadExitLength);
-  const weight = (1 - smoothstep(nearest, 1.75, 5.6)) * (1 - merge);
-  return y + (exitHeight(progress) - y) * weight;
+function shapeExitApron(x, along, snow, upper, floor) {
+  const local = along - upper.along;
+  if (local < -4 || local > 38 || Math.abs(x - upper.x - 2) > 19) return snow;
+  const longitudinal = smoothstep(local, -4, 0) * (1 - smoothstep(local, 24, 38));
+  const lateral = 1 - smoothstep(Math.abs(x - upper.x - 2), 7, 19);
+  return snow + (floor - exitDrop(local - .22) - snow) * longitudinal * lateral;
 }
 
-
-function originalTerrain(x, along) {
-  const west = smoothstep(-x, 10, 35) * (3 * Math.sin(along * 0.077) - 2);
-  const east = smoothstep(x, 9, 43);
-  const ridge = 35 * smoothstep(along, 19, 111);
-  const rolls = (Math.sin(x * 0.23 + along * 0.105) + Math.cos(x * 0.13 - along * 0.18)) * 1.15;
-  const baseFade = smoothstep(along, -6, 26);
-  const hollowCenter = 24 + 4 * Math.sin((along - 18) * 0.059);
-  const hollow = 4.2 * Math.exp(-(((x - hollowCenter) / 9) ** 2));
-  const westShoulder = 7.6 * Math.exp(-(((x + 28 + 5 * Math.sin(along * 0.076)) / 14) ** 2));
-  const eastShoulder = 8.5 * Math.exp(-(((x - (72 + 5 * Math.cos(along * 0.061))) / 12) ** 2));
-  const drainage = smoothstep(along, 5, 27) * (1 - smoothstep(along, 77, 101));
-  const original = originalLiftGround(along) + west * baseFade + east * (ridge + rolls * baseFade)
-    + drainage * (westShoulder + eastShoulder - hollow);
-  return original;
-}
+const terrainLifts = [
+  [places.pairBase, places.pairTop, pairLine, liftGround],
+  [places.quadBase, places.quadTop, quadLine, quadLiftGround],
+  [places.pairUpperBase, places.pairUpperTop, upperPairLine, upperPairGround],
+];
 
 export function terrainHeight(x, along) {
-  const base = elevationScale * originalTerrain(x / slopeWidthScale, originalAlong(along));
-  const linkBank = 10 * smoothstep(x, 32, 70) * smoothstep(along, -285, -9)
-    * (1 - smoothstep(along, -9, 112));
-  const pairCorridor = 1 - smoothstep(Math.abs(x + 2), 4.2, 11);
-  const pairSnow = liftGround(along);
-  const groomed = base + (pairSnow - base) * pairCorridor;
-  const lowerAlong = along - places.quadBase.along;
-  const lineProgress = smoothstep(along, quadLine.climbStart, quadLine.climbEnd);
-  const quadX = places.quadBase.x + (places.quadTop.x - places.quadBase.x) * lineProgress;
-  const quadCorridor = (1 - smoothstep(Math.abs(x - (quadX - 2.65)), 4.6, 8.3))
-    * smoothstep(lowerAlong, 5, 29) * (1 - smoothstep(lowerAlong, 165, 205));
-  const quadCeiling = quadLiftGround(along) - 1.2;
-  const lowered = groomed + linkBank;
-  const cleared = lowered - Math.max(0, lowered - quadCeiling) * quadCorridor;
-
-  // The rolls fade out around both stations and the groomed lift corridor.
-  const reliefZone = smoothstep(along, 35, 86) * (1 - smoothstep(along, 244, 280));
-  const spur = 2.8 * Math.exp(-(((x + 16 + 4 * Math.sin(along / 52)) / 9) ** 2));
-  const gully = 3.1 * Math.exp(-(((x - 43 - 5 * Math.sin(along / 41)) / 10) ** 2));
-  const shoulder = 2.5 * Math.exp(-(((x - 67 + 3 * Math.cos(along / 43)) / 13) ** 2));
-  const relief = reliefZone * (spur + shoulder - gully) * (1 - pairCorridor);
-  let snow = shapeQuadApron(x, along, cleared + relief);
-  for (const quad of [false, true]) {
-    const line = quad ? quadLine : pairLine;
-    const lower = quad ? places.quadBase : places.pairBase;
-    const upper = quad ? places.quadTop : places.pairTop;
-    const track = quad ? quadLiftGround : liftGround;
-    const radius = quad ? 2.65 : 2;
+  const grade = quadLiftGround(along) + upperPairGround(along) - quadSummitFloor;
+  const lowerShoulder = smoothstep(x, 94, 152) * (1 - smoothstep(along, 15, 242));
+  const meadow = grade + (liftGround(along) - grade) * lowerShoulder;
+  const rise = smoothstep(along, -285, -160);
+  const terrainRelief = rise * (1.5 * Math.sin(x * .042 + along * .016)
+    + .9 * Math.cos(x * .076 - along * .017));
+  let snow = meadow + terrainRelief;
+  for (const [lower, upper, line, track] of terrainLifts) {
     const center = lower.x + (upper.x - lower.x) * smoothstep(along, line.climbStart, line.climbEnd);
-    const width = 1 - smoothstep(Math.abs(x - (center - radius)), radius + 1.55, radius + 4);
-    for (const summit of [false, true]) {
-      const front = terminalNetFront(quad, summit);
-      const weight = width * (1 - smoothstep(Math.abs(along - front), 2, 14));
-      snow -= Math.max(0, snow - (track(along) - 1.9)) * weight;
-    }
+    const cross = 1 - smoothstep(Math.abs(x - center + 1), 7, 32);
+    const length = smoothstep(along, lower.along - 39, lower.along - 16)
+      * (1 - smoothstep(along, upper.along + 15, upper.along + 39));
+    snow += (track(along) - snow) * cross * length;
+  }
+  for (const [, upper, , track] of terrainLifts) {
+    snow = shapeExitApron(x, along, snow, upper, track(upper.along));
   }
   return snow;
 }
 
 export function nearCourse(x, along, margin) {
-  return courses.some(course => course.samples.some(([cx, cy]) =>
-    Math.hypot(cx - x, cy - along) < course.width / 2 + margin));
+  return courses.some(course => [course.samples, course.midwaySamples].some(path => path?.some(([cx, cy]) =>
+    Math.hypot(cx - x, cy - along) < course.width / 2 + margin)));
+}
+
+export function nearLift(x, along) {
+  if (terrainLifts.some(([, upper]) => along >= upper.along && along <= upper.along + 28
+    && Math.abs(x - upper.x - 2) < 8)) return true;
+  return terrainLifts.some(([lower, upper, line]) => {
+    if (along < lower.along - 19 || along > upper.along + 18) return false;
+    const center = lower.x + (upper.x - lower.x) * smoothstep(along, line.climbStart, line.climbEnd);
+    return Math.abs(x - center + 1.5) < 8;
+  });
 }

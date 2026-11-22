@@ -44,3 +44,42 @@ test('both lift types reserve a chair and complete a ride independently of rende
     assert.ok(lift.state.reservedChair >= 0 && lift.state.reservedChair < lift.config.chairCount);
   }
 });
+
+test('the quad waits outside the return sweep and clears it before boarding', () => {
+  const lift = createLiftOperations(true);
+  const { lower, start, waitingAlong, loadingStop, boarding, wheelRadius } = lift.config;
+  assert.ok(start - waitingAlong > wheelRadius + 2);
+  const chair = { set(x, y, z) { Object.assign(this, {x, y, z}); } };
+  let boarded = false;
+  let greenAt;
+  let previousGreen = false;
+  lift.begin();
+  for (let step = 0; step < 12000; step++) {
+    lift.advance(.005);
+    const state = lift.state;
+    const queue = lift.boardingQueueAt(state.travel);
+    if (queue.green && !previousGreen && state.phase === 'boarding') greenAt = state.travel;
+    previousGreen = queue.green;
+    if (state.phase === 'riding') {
+      boarded = true;
+      break;
+    }
+    if (state.phase !== 'boarding') continue;
+    const along = Math.min(loadingStop, waitingAlong + (loadingStop - waitingAlong) * state.approach
+      - (state.queueRow + state.approachRowOffset) * 1.13);
+    lift.chairDistances.forEach((distance, index) => {
+      // The last part of the reserved chair's approach is the intentional seat contact.
+      if (index === state.reservedChair && state.along > boarding - 1.25) return;
+      const yaw = lift.liftPose(distance, chair);
+      for (const seat of [-.96, -.32, .32, .96]) {
+        const dx = lower.x + seat - chair.x, dz = -along - chair.z;
+        const lateral = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+        const longitudinal = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+        const gap = Math.hypot(Math.max(0, Math.abs(lateral) - 1.45),
+          Math.max(0, Math.abs(longitudinal) - .50));
+        assert.ok(gap >= .75);
+      }
+    });
+  }
+  assert.ok(boarded && greenAt !== undefined);
+});

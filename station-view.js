@@ -1,22 +1,23 @@
 import * as THREE from './node_modules/three/build/three.module.js';
-import { terrainHeight, terminalNetFront, quadExitLength, quadExitPose } from './resort.js';
-import { createBatches } from './render-optimization.js';
+import { terrainHeight, terminalNetFront, exitRunLength, liftExitPose } from './resort.js';
+import { createBatches, mergeFixedMeshes } from './render-optimization.js';
 import { addSheaveTrain, addBullwheelDetails, gripCamContact } from './lift-model.js';
 
 export function createStationView(scene, operations, { mesh, box, material, steel, orange, dark }) {
-  const { quad, lower, upper, boarding, loadingStop, waitingAlong, signalAlong, unloading, start, end, climbStart, climbEnd, cableHeight,
+  const existing = new Set(scene.children);
+  const { quad, upperPair, lower, upper, boarding, loadingStop, waitingAlong, signalAlong, unloading, start, end, climbStart, climbEnd, cableHeight,
     wheelRadius, lineLength, turnLength, loopLength, baseTurn, railDrop, summit, handoff, towerPositions, announcementPoints } = operations.config;
-  const { lineX, trackGround, liftPose, speedAt, handoffDistance, railSupport, railFall, gripOpen } = operations;
+  const { lineX, trackGround, ropeYAt, liftPose, speedAt, handoffDistance, railSupport, railFall, gripOpen } = operations;
 
   const seatXs = quad ? [-.96, -.32, .32, .96] : [-.375, .375];
   const waitingDepth = loadingStop - waitingAlong;
-  const waitingOffset = quad ? 2.85 : 1.95;
+  const waitingOffset = quad ? 0 : 1.95;
   const platformY = trackGround(boarding) + .045;
   const packedSnow = new THREE.MeshPhysicalMaterial({
     color: 0xd5e4eb, roughness: .43, metalness: .06,
     clearcoat: .22, clearcoatRoughness: .55,
   });
-  const stationWidth = quad ? 3.28 : 2.16;
+  const stationWidth = quad ? 3.60 : 2.16;
   const entrance = waitingAlong - 4.2;
   const platformEnd = boarding + 1.75;
   box(stationWidth + waitingOffset, .16, platformEnd - entrance, packedSnow, lower.x + waitingOffset / 2,
@@ -32,14 +33,15 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   const exitFloor = quad ? terrainHeight(upper.x, unloading) : summit + .045;
   box(quad ? 3.0 : 1.72, .018, .16, exitPaint, upper.x, exitFloor + .019, -unloading - .19).name = 'unload-line';
 
-  if (quad) {
+  const exitPoint = distance => liftExitPose(upper, summit, distance);
+  {
     const vertices = [];
     const indices = [];
-    for (let step = 0; step <= 16; step++) {
-      const point = quadExitPose(step * .25);
+    for (let step = 0; step <= 36; step++) {
+      const point = exitPoint(step * .5);
       for (const side of [-1, 1]) {
-        const x = point.x + side * 1.6 * Math.cos(point.yaw);
-        const along = point.along + side * 1.6 * Math.sin(point.yaw);
+        const x = point.x + side * (2.15 + step * .045);
+        const along = point.along;
         vertices.push(x, terrainHeight(x, along) + .011, -along);
       }
       const i = step * 2;
@@ -74,15 +76,9 @@ export function createStationView(scene, operations, { mesh, box, material, stee
     mesh(arrow, arrowPaint, 0, 0, 0).name = 'unload-arrow';
   }
 
-  if (quad) {
-    for (const distance of [1.5, 4, 7, 10, 13]) {
-      const point=quadExitPose(distance);
-      markerArrow(point.x, point.along, -Math.sin(point.yaw), Math.cos(point.yaw));
-    }
-  } else {
-    for (const [x,a,dx,da] of [[.65,1,1,.9],[2.25,2.5,1,.3],[4.4,3.2,1,0],[6.5,3.3,1,0],[9.0,4.0,1,.25]]) {
-      markerArrow(upper.x+x, unloading+a, dx, da);
-    }
+  for (const distance of [1.5, 4, 7, 10, 13, 16]) {
+    const point = exitPoint(distance);
+    markerArrow(point.x, point.along, 0, 1);
   }
 
   const netCord = new THREE.LineBasicMaterial({ color: 0xf47730 });
@@ -118,7 +114,7 @@ export function createStationView(scene, operations, { mesh, box, material, stee
     scene.add(new THREE.LineSegments(geometry, queueRope ? queueCord : netCord));
   }
 
-  const queueHalfWidth = quad ? 1.43 : .92;
+  const queueHalfWidth = quad ? 1.62 : .92;
   const queueX = lower.x + waitingOffset;
   const queueFloor = (x, along) => Math.max(platformY, terrainHeight(x, along));
   for (const side of [-1, 1]) {
@@ -142,25 +138,17 @@ export function createStationView(scene, operations, { mesh, box, material, stee
     netSpan(left, front, right, front);
   }
 
-  terminalPerimeter(terminalNetFront(quad, false), boarding - waitingDepth - 3.9,
+  terminalPerimeter(terminalNetFront(quad, false, upperPair), boarding - waitingDepth - 3.9,
     lower.x - 2 * wheelRadius - 2.35, queueX + 2.25);
-  terminalPerimeter(terminalNetFront(quad, true), unloading + 7,
+  terminalPerimeter(terminalNetFront(quad, true, upperPair), unloading + 7,
     upper.x - 2 * wheelRadius - 2.35, upper.x + (quad ? 16 : 11.5));
 
-  if (quad) {
-    for (const side of [-1, 1]) {
-      const path = [4.6, 6.7, 8.8, 10.9, 13].map(distance => {
-        const point = quadExitPose(distance);
-        return [point.x + side * 2.2 * Math.cos(point.yaw),
-          point.along + side * 2.2 * Math.sin(point.yaw)];
-      });
-      guideNet(path, terrainHeight);
-    }
-  } else {
-    for (const side of [-1, 1]) {
-      guideNet([[3.1, 1.7], [5.2, 2.5], [7.5, 3.4], [10, 4.4]]
-        .map(([x, along]) => [upper.x + x, unloading + along + side * 1.55]), terrainHeight);
-    }
+  for (const side of [-1, 1]) {
+    const path = [4, 7, 10, 13, 16].map(distance => {
+      const point = exitPoint(distance);
+      return [point.x + side * (2.8 + .22 * distance), point.along];
+    });
+    guideNet(path, terrainHeight);
   }
 
   const hutWall = material(0xb99576);
@@ -193,13 +181,13 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   ink.textAlign='center';
   ink.fillStyle='#ffffff';
   ink.font='bold 46px sans-serif';
-  ink.fillText('降り口  ↗',240,70);
+  ink.fillText('降り口  ↑',240,70);
   ink.font='bold 27px sans-serif';
-  ink.fillText(quad ? '青い矢印に沿って緩斜面へ' : 'こもれび林間へ',240,123);
+  ink.fillText(quad ? '青い矢印に沿って緩斜面へ' : upperPair ? '風切り尾根・林間方面' : 'ひだまりゲレンデへ',240,123);
   const exitTexture=new THREE.CanvasTexture(exitSign);
   exitTexture.colorSpace=THREE.SRGBColorSpace;
-  const signX=upper.x+(quad?2.8:2.0);
-  const signA=unloading+(quad?2.4:1.4);
+  const signX=upper.x+6.8;
+  const signA=unloading+3.6;
   const signFloor=terrainHeight(signX,signA);
   for (const side of [-.65,.65]) box(.065,1.9,.065,steel,signX+side,signFloor+.95,-signA-.04);
   const sign=mesh(new THREE.PlaneGeometry(1.92,.64),new THREE.MeshBasicMaterial({map:exitTexture,side:THREE.DoubleSide}),
@@ -236,7 +224,7 @@ export function createStationView(scene, operations, { mesh, box, material, stee
       box(.048, .015, .19, whitePaint, sign * .06, 0, -.22, arrow).rotation.y = sign * .64;
     }
   }
-  const poleX = queueX + (quad ? 1.62 : 1.12);
+  const poleX = queueX + (quad ? 2.05 : 1.12);
   box(.13, 2.95, .13, steel, poleX, platformY + 1.475, signalZ);
   box(Math.abs(signalX - poleX) + .32, .09, .09, steel, (signalX + poleX) / 2, platformY + 2.86, signalZ);
   box(.72, .30, .19, signalBody, signalX, platformY + 2.63, signalZ);
@@ -259,16 +247,15 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   if (quad) {
     const edge = material(0x239497);
     const flag = material(0xe67d37);
-    for (let d = 3; d < quadExitLength - 2; d += 1.7) {
-      const point = quadExitPose(d);
-      const offsetX = Math.cos(point.yaw) * 2.05;
-      const offsetAlong = Math.sin(point.yaw) * 2.05;
+    for (let d = 3; d < exitRunLength - 2; d += 1.7) {
+      const point = exitPoint(d);
+      const offsetX = 2.8 + .22 * d;
       for (const side of [-1, 1]) {
         const x = point.x + offsetX * side;
-        const along = point.along + offsetAlong * side;
+        const along = point.along;
         const floor = terrainHeight(x, along);
         box(0.08, 0.85, 0.08, edge, x, floor + 0.42, -along);
-        box(0.26, 0.26, 0.06, flag, x, floor + 0.77, -along).rotation.y = point.yaw;
+        box(0.26, 0.26, 0.06, flag, x, floor + 0.77, -along);
       }
     }
   }
@@ -304,9 +291,12 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   }
 
   const summitTurn = lineLength;
-  const stops = quad
-    ? Array.from({ length: Math.ceil(lineLength / 2) + 1 }, (_, i) => Math.min(i * 2, lineLength))
-    : [0, climbStart - start, climbEnd - start, summitTurn];
+  // Use the same curved path as the carriers, with vertices at each tower.
+  const sectionCount = Math.ceil(lineLength / 2);
+  const stops = [...new Set([
+    ...Array.from({ length: sectionCount + 1 }, (_, i) => i * lineLength / sectionCount),
+    ...towerPositions.map(along => along - start),
+  ])].sort((a, b) => a - b);
   for (const distances of [stops, stops.toReversed().map(d => baseTurn - d)]) {
     for (let i = 1; i < distances.length; i++) {
       addCableSpan(cablePosition(distances[i - 1]), cablePosition(distances[i]));
@@ -391,8 +381,10 @@ export function createStationView(scene, operations, { mesh, box, material, stee
     if (quad) {
       const stationRoof = material(0x225460);
       const roofZ = z + (index === 0 ? 5.5 : -5.5);
-      box(9.2, 0.24, 17, stationRoof, x, y + cableHeight + 1.15, roofZ);
-      for (const offset of [-4.25, 4.25]) {
+      const postOffsets = index === 1 ? [-4.25, 5.25] : [-4.25, 4.25];
+      const roofCenter = x + (postOffsets[0] + postOffsets[1]) / 2;
+      box(postOffsets[1] - postOffsets[0] + .70, .24, 17, stationRoof, roofCenter, y + cableHeight + 1.15, roofZ);
+      for (const offset of postOffsets) {
         for (const shift of [-6, 6]) {
           const floor = terrainHeight(x + offset, -roofZ - shift);
           const pole = y + cableHeight + 1.15 - floor;
@@ -445,16 +437,26 @@ export function createStationView(scene, operations, { mesh, box, material, stee
   }
 
   for (const along of towerPositions) {
-    const y = trackGround(along);
+    const ropeY = ropeYAt(along);
     const x = lineX(along) - wheelRadius;
     const ground = terrainHeight(x, along);
-    const height = y - ground + cableHeight + 0.42;
+    const height = ropeY - ground + 0.42;
     box(0.34, height, 0.34, steel, x, ground + height / 2, -along);
-    box(wheelRadius * 2 + 0.44, 0.19, 0.34, steel, x, y + cableHeight + 0.59, -along);
-    for (const side of [-1, 1]) addSheaveTrain(scene, x + side * wheelRadius, y + cableHeight, -along);
+    box(wheelRadius * 2 + 0.44, 0.19, 0.34, steel, x, ropeY + 0.59, -along);
+    const pitch = Math.atan2(ropeYAt(along + .1) - ropeYAt(along - .1),
+      Math.hypot(.2, lineX(along + .1) - lineX(along - .1)));
+    for (const distance of [along - start, baseTurn - (along - start)]) {
+      const train = new THREE.Group();
+      const yaw = liftPose(distance, train.position);
+      train.rotation.set(pitch, distance < lineLength ? yaw : yaw - Math.PI, 0, 'YXZ');
+      addSheaveTrain(train, 0, 0, 0);
+      scene.add(train);
+      mergeFixedMeshes(train, train.children);
+    }
   }
 
   cableBatches.build();
+  mergeFixedMeshes(scene, scene.children.filter(child => !existing.has(child)), 16);
 
   function renderAt(travel, ropeTravel) {
     for (const wheel of wheels) wheel.rotation.y = ropeTravel / wheelRadius;
