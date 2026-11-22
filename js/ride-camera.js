@@ -1,7 +1,7 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { liftExitPose, liftExitProgress, exitRunLength } from './resort.js';
 
-export function createRideCamera(canvas, gripView, config, { waitingDepth, waitingOffset, platformY, seatXs }) {
+export function createRideCamera(canvas, gripView, config, { waitingDepth, waitingOffset, platformY, seatXs }, signal) {
   const { quad, lower, upper, boarding, loadingStop, waitingAlong, unloading, summit, chairDrop,
     cableHeight, railDrop, glideSeconds } = config;
   const verticalFov = 67;
@@ -29,24 +29,24 @@ export function createRideCamera(canvas, gripView, config, { waitingDepth, waiti
     gripView.setAttribute('aria-pressed', String(inspectingGrip));
     gripView.textContent = inspectingGrip ? '乗車視点に戻る' : '握索機を見る';
   }
-  gripView.addEventListener('click', () => setInspection(!inspectingGrip));
+  gripView.addEventListener('click', () => setInspection(!inspectingGrip), { signal });
   canvas.addEventListener('pointerdown', event => {
     if (event.button !== 0 || dragPointer !== undefined) return;
     dragPointer = event.pointerId;
     pointerX = event.clientX;
     pointerY = event.clientY;
     canvas.setPointerCapture(dragPointer);
-  });
+  }, { signal });
   canvas.addEventListener('pointermove', event => {
     if (event.pointerId !== dragPointer) return;
     lookYaw -= (event.clientX - pointerX) * 0.004;
     lookPitch = THREE.MathUtils.clamp(lookPitch - (event.clientY - pointerY) * 0.004, -1.26, 1.26);
     pointerX = event.clientX;
     pointerY = event.clientY;
-  });
+  }, { signal });
   canvas.addEventListener('lostpointercapture', event => {
     if (event.pointerId === dragPointer) dragPointer = undefined;
-  });
+  }, { signal });
 
   function riderPose({phase, along, glideElapsed, queueRow, approachRowOffset, approach, sitProgress}, chair, queueSpacing) {
     seatedEye.set(seatXs[quad ? 1 : 0], 1.02 - chairDrop, -.22);

@@ -137,30 +137,10 @@
     titleScreen.addEventListener('cancel', event => event.preventDefault());
     const loadingScreen = document.querySelector('#loading-screen');
     loadingScreen.addEventListener('cancel', event => event.preventDefault());
-    let transition;
-    try {
-      const stored = sessionStorage.getItem('lift-transition');
-      if (stored) {
-        sessionStorage.removeItem('lift-transition');
-        const pending = JSON.parse(stored);
-        if (pending.destination === location.href) transition = pending;
-      }
-    } catch (error) {
-      console.warn('リフトの切り替え情報を読み込めませんでした', error);
-    }
-    if (transition) loadingScreen.showModal();
-    else titleScreen.showModal();
+    titleScreen.showModal();
     import('./js/install-guide.js').catch(console.error);
     import('./js/resort-map.js').catch(console.error);
-    import('./js/lift.js').then(({ startExperience }) => {
-      if (transition) startExperience(transition.mode, transition.sound);
-    }).catch(error => {
-      if (transition) {
-        document.querySelector('#loading-message').textContent = 'リフトを読み込めませんでした';
-        const back = document.querySelector('#loading-back');
-        back.hidden = false;
-        back.addEventListener('click', () => location.reload());
-      }
+    import('./js/lift.js').catch(error => {
       document.querySelector('#status').textContent = '起動できませんでした。依存関係とWebGL 2の設定を確認してください。';
       document.querySelector('#start-button').textContent = '起動できませんでした';
       console.error(error);

@@ -1,4 +1,6 @@
-export function createRideAudio(button, chime, jointClip, announcementFiles, speakers = {}) {
+let sharedContext;
+
+export function createRideAudio(button, chime, jointClip, announcementFiles, speakers = {}, signal) {
   let engine, enabled=true, lastUpdate=-Infinity;
   let previousJointPhase = null;
   const announcements = new Map();
@@ -7,7 +9,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
   button.hidden=!AudioEngine;
 
   function setup() {
-    const context=new AudioEngine();
+    const context=sharedContext ??= new AudioEngine();
     const buffer=context.createBuffer(1,context.sampleRate*3,context.sampleRate);
     const data=buffer.getChannelData(0);
     for(let i=0;i<data.length;i++) data[i]=Math.random()*2-1;
@@ -27,7 +29,7 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       gain.gain.value=0;
       source.connect(filter).connect(gain).connect(master);
       source.start();
-      return {gain,filter};
+      return {source,gain,filter};
     }
 
     const wind=noise('lowpass',490);
@@ -73,14 +75,14 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       return;
     }
   }
-  button.addEventListener('click', () => setEnabled(!enabled));
+  button.addEventListener('click', () => setEnabled(!enabled), { signal });
   function resumeOnInteraction(event) {
     if (!enabled || !engine || button.contains(event.target) || engine.context.state === 'running') return;
     void engine.context.resume().catch(() => {});
   }
-  window.addEventListener('touchend', resumeOnInteraction, { passive: true });
-  window.addEventListener('click', resumeOnInteraction);
-  window.addEventListener('keydown', resumeOnInteraction);
+  window.addEventListener('touchend', resumeOnInteraction, { passive: true, signal });
+  window.addEventListener('click', resumeOnInteraction, { signal });
+  window.addEventListener('keydown', resumeOnInteraction, { signal });
 
   async function loadAnnouncement(name, url) {
     loadingAnnouncements.add(name);
@@ -294,5 +296,14 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     stationVoice.gain.setTargetAtTime(volume, now, .26);
   }
 
-  return {update,towerPass,boardingChime,setStationAnnouncement,setListener,setEnabled,isEnabled: () => enabled};
+  function dispose() {
+    if (!engine) return;
+    stopStationAnnouncement();
+    engine.master.disconnect();
+    for (const source of [engine.wind.source, engine.rollers.source, engine.snow.source, engine.motor, engine.motorHum]) {
+      source.stop();
+    }
+  }
+
+  return {dispose,update,towerPass,boardingChime,setStationAnnouncement,setListener,setEnabled,isEnabled: () => enabled};
 }
