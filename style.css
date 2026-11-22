@@ -5,21 +5,28 @@ body {
   color: #f8fcff;
   font: 1rem system-ui, sans-serif;
 }
-main { position: relative; height: 100dvh; min-height: 320px; }
+main {
+  --edge-left: max(clamp(12px, 3vw, 36px), env(safe-area-inset-left));
+  --edge-right: max(clamp(12px, 3vw, 36px), env(safe-area-inset-right));
+  --edge-top: max(clamp(12px, 3vw, 36px), env(safe-area-inset-top));
+  --edge-bottom: max(12px, env(safe-area-inset-bottom));
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+}
 #view { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #view:active { cursor: grabbing; }
 header, .controls {
   position: absolute;
-  left: clamp(12px, 3vw, 36px);
-  max-width: calc(100% - 24px);
+  left: var(--edge-left);
+  max-width: calc(100% - var(--edge-left) - var(--edge-right));
   padding: 12px 16px;
   background: #132e35ed;
   border-radius: 8px;
 }
-header { top: clamp(12px, 3vw, 36px); }
+header { top: var(--edge-top); max-width: calc(100% - var(--edge-left) - var(--edge-right) - 125px); }
 h1 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.8rem); }
 p { margin: 6px 0 0; }
-.controls { bottom: clamp(12px, 3vw, 36px); }
 .controls p { color: #d2e4e7; font-size: .85rem; }
 button, select {
   border: 1px solid #a9cbd1;
@@ -33,8 +40,8 @@ button { cursor: pointer; }
 
 .map-toggle {
   position: absolute;
-  top: clamp(12px, 3vw, 36px);
-  right: clamp(12px, 3vw, 36px);
+  top: var(--edge-top);
+  right: var(--edge-right);
 }
 dialog {
   width: min(860px, calc(100% - 24px));
@@ -76,7 +83,6 @@ h2 { font-size: 1.2rem; margin: 0; }
 @media (max-width: 640px) {
   .map-body { grid-template-columns: minmax(0, 1fr); }
   #map-view { max-height: 55vh; object-fit: contain; background: #dcebf0; }
-  header { max-width: calc(100% - 128px); }
 }
 
 
@@ -135,7 +141,7 @@ h2 { font-size: 1.2rem; margin: 0; }
 #start-button:focus-visible, #start-experience input:focus-visible { outline: 3px solid #79f0cb; outline-offset: 3px; }
 #start-button:disabled { opacity: .65; }
 
-@media (max-width: 700px) {
+@media (orientation: portrait) {
   #title-screen[open] { align-items: end; }
   .title-art { bottom: min(26%, 168px); background-position: 69% 50%; }
   .title-art::after { background: linear-gradient(0deg, #132e35 0%, transparent 37%); }
@@ -159,15 +165,18 @@ h2 { font-size: 1.2rem; margin: 0; }
   flex-wrap: wrap;
   align-items: center;
   gap: .38rem .5rem;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: var(--edge-bottom);
+  max-height: 39dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .controls > p { flex-basis: 100%; }
 #ski-controls {
   position: absolute;
   z-index: 2;
   bottom: max(12px, env(safe-area-inset-bottom));
-  left: max(12px, env(safe-area-inset-left));
-  right: max(12px, env(safe-area-inset-right));
+  left: var(--edge-left);
+  right: var(--edge-right);
   display: flex;
   justify-content: space-between;
   pointer-events: none;
@@ -198,13 +207,15 @@ main:has(#ski-controls:not([hidden])) .controls { bottom: calc(max(12px, env(saf
   #title-heading { font-size: clamp(1.25rem, 4.3vh, 1.9rem); }
   .title-resort { margin-bottom: .45rem; }
   #start-experience fieldset { margin-bottom: .45rem; padding-block: .2rem .35rem; }
-  .controls { max-width: min(76vw, 660px); padding: 7px 10px; }
-  .controls button, .controls select { padding: 4px 6px; }
+  header { padding: 7px 10px; }
+  .controls { max-width: min(780px, calc(100% - var(--edge-left) - var(--edge-right))); padding: 7px 10px; }
+  .controls button, .controls select { min-height: 36px; padding: 4px 7px; }
+  .controls > #look-help { flex-basis: auto; }
   .map-body { grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); }
   #map-view { max-height: 66dvh; object-fit: contain; background: #dcebf0; }
 }
 @media (orientation: portrait) and (max-width: 600px) {
-  .controls { right: 12px; left: 12px; max-width: none; padding: 8px; gap: .35rem; }
+  .controls { right: var(--edge-right); max-width: none; padding: 8px; gap: .35rem; }
   .controls button, .controls select { min-height: 36px; padding: 4px 7px; }
   #ski-controls { justify-content: center; gap: .5rem; }
 }

@@ -371,8 +371,11 @@ function onResize() {
 
 function resize() {
   resizeNeeded = false;
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-  rideCamera.resize(canvas.clientWidth, canvas.clientHeight);
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (!width || !height) return;
+  renderer.setSize(width, height, false);
+  rideCamera.resize(width, height);
 }
 
 const terminalLabels = {
@@ -454,8 +457,9 @@ function frame(time) {
     quad, quiet,
   });
   nextRenderTime ??= time;
-  if (!trailMap.open && time + .5 >= nextRenderTime) {
+  if (!trailMap.open && (resizeNeeded || time + .5 >= nextRenderTime)) {
     nextRenderTime = Math.max(nextRenderTime + renderInterval, time);
+    if (resizeNeeded) resize();
     updateChairPoses();
     population.updateSkiers(travel);
     station.updateBoardingSignal(boardingEnabled && queue.green);
@@ -472,7 +476,6 @@ function frame(time) {
     camera.getWorldDirection(listenerForward);
     listenerUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
     audio.setListener(camera.position, listenerForward, listenerUp);
-    if (resizeNeeded) resize();
     updateDistantInstances(camera);
     station.renderAt(travel, ropeTravel, camera);
     renderer.render(scene, camera);
@@ -505,6 +508,7 @@ startForm.addEventListener('submit', event => {
 });
 document.querySelector('#back-to-title').addEventListener('click', () => location.reload());
 
+new ResizeObserver(onResize).observe(canvas);
 window.addEventListener('resize', onResize);
 resize();
 begin();
