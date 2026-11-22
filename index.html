@@ -82,8 +82,25 @@
         </fieldset>
         <button id="start-button" type="submit" disabled>スタート</button>
       </form>
-      <button id="install-app" type="button">ホーム画面に追加</button>
+      <div class="title-actions">
+        <button id="show-help" type="button" aria-haspopup="dialog">ヘルプ</button>
+        <button id="install-app" type="button">ホーム画面に追加</button>
       </div>
+      </div>
+    </dialog>
+    <dialog id="help-guide" aria-labelledby="help-heading">
+      <div class="map-heading">
+        <h2 id="help-heading">遊び方</h2>
+        <form method="dialog"><button type="submit" autofocus>閉じる</button></form>
+      </div>
+      <h3>乗客モード</h3>
+      <p>待機列に並び、順番が来ると自動で乗車・降車します。画面をドラッグして見回せます。降車後は滑走コースを選べます。クワッドから第2ペアにも乗り継げます。</p>
+      <h3>係員モード</h3>
+      <p>乗車口と降車口の視点を切り替えられます。「ストップ」で減速して停止し、「スタート」で加速して再開します。</p>
+      <h3>滑走の操作</h3>
+      <p>スマホ・タブレットは画面の操作ボタン、PCは矢印キーを使います。←・→でターン、↑で加速、↓でブレーキです。</p>
+      <h3>環境音が聞こえないとき</h3>
+      <p>「環境音を聴く」と表示されていたら押してください。オンでも聞こえない場合は、画面を一度タップし、端末の音量も確認してください。</p>
     </dialog>
     <dialog id="install-guide" aria-labelledby="install-heading">
       <div class="map-heading">
@@ -115,6 +132,8 @@
   </main>
   <script type="module">
     const titleScreen = document.querySelector('#title-screen');
+    const helpGuide = document.querySelector('#help-guide');
+    document.querySelector('#show-help').addEventListener('click', () => helpGuide.showModal());
     titleScreen.addEventListener('cancel', event => event.preventDefault());
     const loadingScreen = document.querySelector('#loading-screen');
     loadingScreen.addEventListener('cancel', event => event.preventDefault());
