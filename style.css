@@ -17,14 +17,11 @@ main {
 #view { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #view:active { cursor: grabbing; }
 header, .controls {
-  position: absolute;
-  left: var(--edge-left);
-  max-width: calc(100% - var(--edge-left) - var(--edge-right));
   padding: 12px 16px;
   background: #132e35ed;
   border-radius: 8px;
 }
-header { top: var(--edge-top); max-width: calc(100% - var(--edge-left) - var(--edge-right) - 125px); }
+header { position: absolute; left: var(--edge-left); top: var(--edge-top); max-width: calc(100% - var(--edge-left) - var(--edge-right) - 125px); }
 h1 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.8rem); }
 p { margin: 6px 0 0; }
 .controls p { color: #d2e4e7; font-size: .85rem; }
@@ -164,12 +161,23 @@ h2 { font-size: 1.2rem; margin: 0; }
 #install-guide { max-width: 440px; }
 #install-guide h3 { margin: 1rem 0 .4rem; font-size: 1rem; }
 #install-guide p { line-height: 1.55; }
+.controls-dock {
+  position: absolute;
+  left: var(--edge-left);
+  bottom: var(--edge-bottom);
+  max-width: calc(100% - var(--edge-left) - var(--edge-right));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .3rem;
+}
+#toggle-controls { min-height: 36px; padding: 4px 9px; }
 .controls {
   display: flex;
+  max-width: 100%;
   flex-wrap: wrap;
   align-items: center;
   gap: .38rem .5rem;
-  bottom: var(--edge-bottom);
   max-height: 39dvh;
   overflow: auto;
   overscroll-behavior: contain;
@@ -187,7 +195,7 @@ h2 { font-size: 1.2rem; margin: 0; }
 }
 #ski-controls > div { display: flex; gap: .35rem; }
 #ski-controls button { min-width: 48px; min-height: 48px; pointer-events: auto; touch-action: none; }
-main:has(#ski-controls:not([hidden])) .controls { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 57px); }
+main:has(#ski-controls:not([hidden])) .controls-dock { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 57px); }
 #rotation-tip {
   position: absolute;
   top: 32%;
@@ -212,14 +220,16 @@ main:has(#ski-controls:not([hidden])) .controls { bottom: calc(max(12px, env(saf
   .title-resort { margin-bottom: .45rem; }
   #start-experience fieldset { margin-bottom: .45rem; padding-block: .2rem .35rem; }
   header { padding: 7px 10px; }
-  .controls { max-width: min(780px, calc(100% - var(--edge-left) - var(--edge-right))); padding: 7px 10px; }
+  .controls-dock { max-width: min(780px, calc(100% - var(--edge-left) - var(--edge-right))); }
+  .controls { padding: 7px 10px; }
   .controls button, .controls select { min-height: 36px; padding: 4px 7px; }
   .controls > #look-help { flex-basis: auto; }
   .map-body { grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); }
   #map-view { max-height: 66dvh; object-fit: contain; background: #dcebf0; }
 }
 @media (orientation: portrait) and (max-width: 600px) {
-  .controls { right: var(--edge-right); max-width: none; padding: 8px; gap: .35rem; }
+  .controls-dock { right: var(--edge-right); }
+  .controls { padding: 8px; gap: .35rem; }
   .controls button, .controls select { min-height: 36px; padding: 4px 7px; }
   #ski-controls { justify-content: center; gap: .5rem; }
 }
