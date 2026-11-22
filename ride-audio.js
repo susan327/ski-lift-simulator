@@ -50,12 +50,12 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     return {context,buffer,master,wind,rollers,snow,motor,motorGain,motorHum,humGain};
   }
 
-  button.addEventListener('click', async () => {
+  async function setEnabled(next) {
     if(!AudioEngine)return;
     try{
       engine??=setup();
       await engine.context.resume();
-      enabled=!enabled;
+      enabled=next;
       if (enabled && announcementFiles) {
         for (const [name, url] of Object.entries(announcementFiles)) {
           if (!announcements.has(name) && !loadingAnnouncements.has(name)) loadAnnouncement(name, url);
@@ -69,7 +69,8 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
       button.disabled=true;
       button.textContent='環境音を再生できません';
     }
-  });
+  }
+  button.addEventListener('click', () => setEnabled(!enabled));
 
   async function loadAnnouncement(name, url) {
     loadingAnnouncements.add(name);
@@ -221,5 +222,5 @@ export function createRideAudio(button, chime, jointClip, announcementFiles, spe
     source.start(context.currentTime + delay);
   }
 
-  return {update,towerPass,boardingChime,announce,setListener};
+  return {update,towerPass,boardingChime,announce,setListener,setEnabled,isEnabled: () => enabled};
 }

@@ -23,6 +23,7 @@ function openLift(lift) {
   const url = new URL(location.href);
   if (lift !== 'pair') url.searchParams.set('lift', lift);
   else url.searchParams.delete('lift');
+  sessionStorage.setItem('lift-transition', JSON.stringify({mode: staffView.value ? 'staff' : 'passenger', sound: audio.isEnabled()}));
   location.assign(url);
 }
 liftSelect.addEventListener('change', () => openLift(liftSelect.value));
@@ -123,6 +124,7 @@ const { camera } = rideCamera;
 const player = createPlayerModel(scene);
 const viewMode = document.querySelector('#view-mode');
 const staffView = document.querySelector('#staff-view');
+staffView.value = '';
 staffView.addEventListener('change', () => {
   const active = Boolean(staffView.value);
   rideCamera.reset();
@@ -265,11 +267,12 @@ function setPhase(next) {
 
     : labels[next];
   status.dataset.phase = next;
-  finish.hidden = next !== 'arrived';
-  restart.hidden = next !== 'finished';
-  skiButton.hidden = next !== 'arrived';
-  coursePicker.hidden = next !== 'arrived';
-  transfer.hidden = next !== 'arrived' || !quad;
+  const staff = Boolean(staffView.value);
+  finish.hidden = staff || next !== 'arrived';
+  restart.hidden = staff || next !== 'finished';
+  skiButton.hidden = staff || next !== 'arrived';
+  coursePicker.hidden = staff || next !== 'arrived';
+  transfer.hidden = staff || next !== 'arrived' || !quad;
   skiReturn.hidden = next !== 'skiArrived';
   skiReturn.textContent = courseIndex === 0 ? '第1ペア麓駅へ' : 'クワッド麓駅へ';
   skiControls.hidden = next !== 'skiing';
@@ -296,6 +299,12 @@ skiButton.addEventListener('click', () => {
   ski.begin(Number(courseSelect.value), quad);
   rideCamera.reset();
   setPhase('skiing');
+  if (!sessionStorage.getItem('ski-rotation-tip') && matchMedia('(pointer: coarse) and (orientation: portrait) and (max-width: 600px)').matches) {
+    sessionStorage.setItem('ski-rotation-tip', 'shown');
+    const tip = document.querySelector('#rotation-tip');
+    tip.hidden = false;
+    setTimeout(() => { tip.hidden = true; }, 4500);
+  }
   skiControls.querySelector('button').focus();
 });
 skiReturn.addEventListener('click', () => {
@@ -310,6 +319,10 @@ skiReturn.addEventListener('click', () => {
 });
 
 const trailMap = document.querySelector('#trail-map');
+const titleScreen = document.querySelector('#title-screen');
+const startForm = document.querySelector('#start-experience');
+const startButton = document.querySelector('#start-button');
+let started = false;
 trailMap.addEventListener('close', clearSkiInput);
 let resizeNeeded = false;
 
@@ -356,7 +369,7 @@ function frame(time) {
   const dt = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.1);
   previousTime = time;
 
-  operations.advance(dt * Number(speedControl.value));
+  operations.advance(started ? dt * Number(speedControl.value) : 0);
   const { travel, ropeTravel, riderDistance, reservedChair, phase, glideElapsed, along } = state;
   if (ski.state.running && !trailMap.open) ski.advance(dt, skiingInput());
   const playerPhase = ski.state.running ? 'skiing' : ski.state.arrived ? 'skiArrived' : phase;
@@ -375,7 +388,7 @@ function frame(time) {
   const stationZone = phase === 'waiting' || phase === 'boarding' || phase === 'unloading'
     || (phase === 'riding' && (state.along < boarding + 24 || state.along > unloading - 24));
   const staffArea = staffView.value;
-  const quiet = trailMap.open || document.hidden;
+  const quiet = !started || trailMap.open || document.hidden;
   const queue = operations.boardingQueueAt(travel);
   soundEvents.update({ phase, along, riderDistance, queue, staffArea, quiet,
     skiing: ski.state.running || ski.state.arrived });
@@ -417,7 +430,31 @@ function frame(time) {
   requestAnimationFrame(frame);
 }
 
+function startExperience(mode, sound) {
+  const staff = mode === 'staff';
+  staffView.value = staff ? 'boarding' : '';
+  document.querySelector('#staff-controls').hidden = !staff;
+  staffView.dispatchEvent(new Event('change'));
+  begin();
+  if (sound) void audio.setEnabled(true);
+  started = true;
+  titleScreen.close();
+}
+
+startForm.addEventListener('submit', event => {
+  event.preventDefault();
+  startExperience(new FormData(startForm).get('mode'), true);
+});
+document.querySelector('#back-to-title').addEventListener('click', () => location.reload());
+
 window.addEventListener('resize', onResize);
 resize();
 begin();
+startButton.disabled = false;
+const transition = sessionStorage.getItem('lift-transition');
+if (transition) {
+  sessionStorage.removeItem('lift-transition');
+  const { mode, sound } = JSON.parse(transition);
+  startExperience(mode, sound);
+}
 requestAnimationFrame(frame);
